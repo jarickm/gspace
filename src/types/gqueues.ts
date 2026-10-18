@@ -89,7 +89,9 @@ export interface GoogleContact {
   email: string;
   avatarUrl?: string;
   jobTitle?: string;
+  department?: string;
   source?: 'contacts' | 'directory' | 'other' | 'custom';
+  isOrgMember?: boolean;
 }
 
 export interface GoogleDriveFile {

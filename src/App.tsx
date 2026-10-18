@@ -4,6 +4,7 @@ import {
   initAuth,
   googleSignIn,
   logout,
+  auth,
 } from './services/firebase';
 import type {
   QueueList,
@@ -180,8 +181,10 @@ export default function App() {
       setTasks(initialTasks);
       setAllTasksCache((prev) => ({ ...prev, [initialQueue.id]: initialTasks }));
 
-      // 3. Fetch Google Contacts for delegation (in background)
-      fetchContacts(accessToken).then(setContacts).catch(console.warn);
+      // 3. Fetch Google Contacts & Workspace Organization Directory (in background)
+      const userEmail = auth.currentUser?.email || user?.email || '';
+      const domain = userEmail.includes('@') ? userEmail.split('@')[1] : 'coolaireconsolidated.com';
+      fetchContacts(accessToken, domain).then(setContacts).catch(console.warn);
 
       // 4. Fetch Google Calendar events (in background)
       const now = new Date();
@@ -1136,6 +1139,8 @@ export default function App() {
           task={selectedTaskForDetail}
           isOpen={true}
           contacts={contacts}
+          accessToken={token}
+          userDomain={user?.email?.includes('@') ? user.email.split('@')[1] : 'coolaireconsolidated.com'}
           onClose={() => setSelectedTaskForDetail(null)}
           onSave={handleSaveTaskDetail}
           onDelete={handleDeleteTaskPrompt}
@@ -1144,7 +1149,8 @@ export default function App() {
           onUnsyncCalendar={handleUnsyncTaskFromCalendar}
           onRefreshContacts={async () => {
             if (token) {
-              const fresh = await fetchContacts(token);
+              const domain = user?.email?.includes('@') ? user.email.split('@')[1] : 'coolaireconsolidated.com';
+              const fresh = await fetchContacts(token, domain);
               setContacts(fresh);
             }
           }}

@@ -616,9 +616,17 @@ export const TaskList: React.FC<TaskListProps> = ({
 
                         {/* Assigned Contact */}
                         {task.assignedContact && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full font-medium">
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full font-medium"
+                            title={`Assigned to ${task.assignedContact.name} (${task.assignedContact.email})`}
+                          >
                             <UserCheck className="w-3 h-3" />
                             <span>{task.assignedContact.name}</span>
+                            {task.assignedContact.email.toLowerCase().includes('coolaire') && (
+                              <span className="text-[9px] text-indigo-800 font-bold bg-indigo-100/80 px-1 rounded">
+                                Coolaire
+                              </span>
+                            )}
                           </span>
                         )}
 

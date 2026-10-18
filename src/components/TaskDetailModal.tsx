@@ -32,13 +32,18 @@ import {
   UserPlus,
   Mail,
   Check,
+  RotateCw,
+  Loader2,
+  Sparkles,
 } from 'lucide-react';
-import { saveCustomTeammate } from '../services/peopleApi';
+import { saveCustomTeammate, searchDirectoryPeople } from '../services/peopleApi';
 
 interface TaskDetailModalProps {
   task: GQueueTask | null;
   isOpen: boolean;
   contacts: GoogleContact[];
+  accessToken?: string | null;
+  userDomain?: string;
   onClose: () => void;
   onSave: (updatedTask: Partial<GQueueTask>) => Promise<void>;
   onDelete: (task: GQueueTask) => void;
@@ -52,6 +57,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   task,
   isOpen,
   contacts,
+  accessToken,
+  userDomain = 'coolaireconsolidated.com',
   onClose,
   onSave,
   onDelete,
@@ -85,10 +92,61 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   // Assignee picker states
   const [isAssigneePickerOpen, setIsAssigneePickerOpen] = useState(false);
   const [assigneeSearchQuery, setAssigneeSearchQuery] = useState('');
-  const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'directory' | 'contacts' | 'add'>('all');
+  const [assigneeFilter, setAssigneeFilter] = useState<'directory' | 'all' | 'contacts' | 'add'>('directory');
   const [newTeammateName, setNewTeammateName] = useState('');
   const [newTeammateEmail, setNewTeammateEmail] = useState('');
   const [newTeammateRole, setNewTeammateRole] = useState('');
+  const [liveDirectoryResults, setLiveDirectoryResults] = useState<GoogleContact[]>([]);
+  const [isSearchingDirectory, setIsSearchingDirectory] = useState(false);
+  const [isRefreshingContacts, setIsRefreshingContacts] = useState(false);
+
+  // Live search Google Workspace Directory on typing
+  React.useEffect(() => {
+    const trimmed = assigneeSearchQuery.trim();
+    if (!trimmed || !accessToken || trimmed.length < 2) {
+      setLiveDirectoryResults([]);
+      setIsSearchingDirectory(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingDirectory(true);
+      try {
+        const results = await searchDirectoryPeople(accessToken, trimmed);
+        setLiveDirectoryResults(results);
+      } catch (err) {
+        console.warn('Live directory search error:', err);
+      } finally {
+        setIsSearchingDirectory(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [assigneeSearchQuery, accessToken]);
+
+  // Combine loaded contacts with any live directory query results
+  const allMergedContacts = useMemo(() => {
+    const map = new Map<string, GoogleContact>();
+    for (const c of contacts) {
+      map.set(c.email.toLowerCase(), c);
+    }
+    for (const live of liveDirectoryResults) {
+      const lower = live.email.toLowerCase();
+      if (!map.has(lower)) {
+        map.set(lower, live);
+      }
+    }
+    return Array.from(map.values());
+  }, [contacts, liveDirectoryResults]);
+
+  // Counts
+  const orgCount = useMemo(() => {
+    return allMergedContacts.filter((c) => c.isOrgMember || c.source === 'directory').length;
+  }, [allMergedContacts]);
+
+  const personalContactsCount = useMemo(() => {
+    return allMergedContacts.filter((c) => c.source === 'contacts' || c.source === 'other').length;
+  }, [allMergedContacts]);
 
   React.useEffect(() => {
     setDriveAttachments(task.driveAttachments || []);
@@ -135,8 +193,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
   // Filtered contacts / directory list
   const filteredContacts = useMemo(() => {
-    return contacts.filter((c) => {
-      if (assigneeFilter === 'directory' && c.source !== 'directory') return false;
+    return allMergedContacts.filter((c) => {
+      if (assigneeFilter === 'directory' && !c.isOrgMember && c.source !== 'directory') return false;
       if (assigneeFilter === 'contacts' && c.source !== 'contacts' && c.source !== 'other') return false;
 
       if (!assigneeSearchQuery.trim()) return true;
@@ -144,10 +202,11 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
       return (
         c.name.toLowerCase().includes(q) ||
         c.email.toLowerCase().includes(q) ||
-        (c.jobTitle && c.jobTitle.toLowerCase().includes(q))
+        (c.jobTitle && c.jobTitle.toLowerCase().includes(q)) ||
+        (c.department && c.department.toLowerCase().includes(q))
       );
     });
-  }, [contacts, assigneeSearchQuery, assigneeFilter]);
+  }, [allMergedContacts, assigneeSearchQuery, assigneeFilter]);
 
   const handleSelectContact = (c: GoogleContact) => {
     setAssignedContact({
@@ -513,12 +572,32 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           <div className="border-t border-slate-200 pt-5 space-y-4">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-                Google Workspace Team & Delegation
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                Google Workspace Delegation & Directory
               </h4>
-              <span className="text-[11px] text-slate-500">
-                {contacts.length} Contacts & Directory Users Loaded
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                  🏢 {orgCount} Coolaire Org Users Detected
+                </span>
+                {onRefreshContacts && (
+                  <button
+                    type="button"
+                    disabled={isRefreshingContacts}
+                    onClick={async () => {
+                      setIsRefreshingContacts(true);
+                      try {
+                        await onRefreshContacts();
+                      } finally {
+                        setIsRefreshingContacts(false);
+                      }
+                    }}
+                    title="Refresh Google Workspace Directory"
+                    className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${isRefreshingContacts ? 'animate-spin text-blue-600' : ''}`} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Delegation: Assignee */}
@@ -526,7 +605,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-purple-600" />
-                  Assignee (Google Contacts & Organization Directory)
+                  Assignee (Coolaire Organization Directory & Google Contacts)
                 </label>
                 {!assignedContact && (
                   <button
@@ -602,47 +681,61 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               {/* Collapsible / Expandable Directory & Contacts Picker */}
               {(!assignedContact || isAssigneePickerOpen) && (
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                  {/* Directory Status Header */}
+                  <div className="px-3 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-lg flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                      <div>
+                        <span className="font-bold text-blue-950">Coolaire Google Workspace Directory</span>
+                        <span className="text-[11px] text-blue-700 ml-1.5">({userDomain})</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-semibold text-blue-700 bg-white/80 px-2 py-0.5 rounded-full border border-blue-200">
+                      Auto-detected
+                    </span>
+                  </div>
+
                   {/* Tabs */}
-                  <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2">
-                    <button
-                      type="button"
-                      onClick={() => setAssigneeFilter('all')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
-                        assigneeFilter === 'all'
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      <Users className="w-3.5 h-3.5" />
-                      All Members ({contacts.length})
-                    </button>
+                  <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2 overflow-x-auto">
                     <button
                       type="button"
                       onClick={() => setAssigneeFilter('directory')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap ${
                         assigneeFilter === 'directory'
-                          ? 'bg-purple-600 text-white'
+                          ? 'bg-blue-600 text-white shadow-2xs'
                           : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                       }`}
                     >
                       <Building2 className="w-3.5 h-3.5" />
-                      🏢 Directory
+                      🏢 Coolaire Org ({orgCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssigneeFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap ${
+                        assigneeFilter === 'all'
+                          ? 'bg-purple-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      All ({allMergedContacts.length})
                     </button>
                     <button
                       type="button"
                       onClick={() => setAssigneeFilter('contacts')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 whitespace-nowrap ${
                         assigneeFilter === 'contacts'
-                          ? 'bg-purple-600 text-white'
+                          ? 'bg-purple-600 text-white shadow-2xs'
                           : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                       }`}
                     >
-                      👥 Contacts
+                      👥 Contacts ({personalContactsCount})
                     </button>
                     <button
                       type="button"
                       onClick={() => setAssigneeFilter('add')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ml-auto ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ml-auto whitespace-nowrap ${
                         assigneeFilter === 'add'
                           ? 'bg-emerald-600 text-white'
                           : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
@@ -659,9 +752,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                           <UserPlus className="w-4 h-4 text-emerald-600" />
-                          Add Organization Teammate
+                          Add Coolaire Organization Teammate
                         </span>
-                        <span className="text-[10px] text-slate-400">Available across all queues</span>
+                        <span className="text-[10px] text-slate-400">Saved to company roster</span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <input
@@ -677,7 +770,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           required
                           value={newTeammateEmail}
                           onChange={(e) => setNewTeammateEmail(e.target.value)}
-                          placeholder="Email (e.g. colleague@company.com)"
+                          placeholder={`name@${userDomain}`}
                           className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-emerald-500"
                         />
                       </div>
@@ -686,7 +779,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           type="text"
                           value={newTeammateRole}
                           onChange={(e) => setNewTeammateRole(e.target.value)}
-                          placeholder="Role / Title (optional, e.g. Designer, Lead Engineer)"
+                          placeholder="Role or Department (e.g. Project Manager, Technician)"
                           className="flex-1 px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-emerald-500"
                         />
                         <button
@@ -707,14 +800,24 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           type="text"
                           value={assigneeSearchQuery}
                           onChange={(e) => setAssigneeSearchQuery(e.target.value)}
-                          placeholder="Search colleagues in organization directory or contacts..."
-                          className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-purple-500 placeholder:text-slate-400"
+                          placeholder={`Search ${userDomain} directory or contacts...`}
+                          className="w-full pl-8 pr-8 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500 placeholder:text-slate-400"
                         />
+                        {isSearchingDirectory && (
+                          <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin absolute right-2.5 top-2.5" />
+                        )}
                       </div>
 
-                      <div className="max-h-48 overflow-y-auto space-y-1 divide-y divide-slate-100">
+                      {isSearchingDirectory && (
+                        <p className="text-[10px] text-blue-600 flex items-center gap-1 px-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Searching Google Workspace organization directory live...
+                        </p>
+                      )}
+
+                      <div className="max-h-52 overflow-y-auto space-y-1 divide-y divide-slate-100">
                         {filteredContacts.length === 0 ? (
-                          <div className="p-4 text-center text-xs text-slate-400 space-y-1">
+                          <div className="p-4 text-center text-xs text-slate-400 space-y-1.5">
                             <p>No colleagues match "{assigneeSearchQuery}".</p>
                             <button
                               type="button"
@@ -723,14 +826,15 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                                 setNewTeammateName(assigneeSearchQuery.includes('@') ? '' : assigneeSearchQuery);
                                 setAssigneeFilter('add');
                               }}
-                              className="text-purple-600 hover:underline font-semibold text-xs"
+                              className="text-blue-600 hover:underline font-semibold text-xs inline-flex items-center gap-1"
                             >
-                              + Add as a new organization teammate
+                              <UserPlus className="w-3.5 h-3.5" /> Add as a new {userDomain} colleague
                             </button>
                           </div>
                         ) : (
                           filteredContacts.map((c) => {
                             const isCurrent = assignedContact?.email.toLowerCase() === c.email.toLowerCase();
+                            const isCoolaire = c.isOrgMember || c.source === 'directory' || c.email.toLowerCase().includes('coolaire');
                             return (
                               <button
                                 key={c.id + c.email}
@@ -747,37 +851,60 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                                     <img
                                       src={c.avatarUrl}
                                       alt=""
-                                      className="w-6 h-6 rounded-full flex-shrink-0"
+                                      className="w-7 h-7 rounded-full flex-shrink-0 border border-slate-200"
                                     />
                                   ) : (
-                                    <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[10px] flex-shrink-0">
+                                    <div
+                                      className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[11px] flex-shrink-0 ${
+                                        isCoolaire
+                                          ? 'bg-blue-600 text-white'
+                                          : 'bg-slate-200 text-slate-700'
+                                      }`}
+                                    >
                                       {c.name[0]?.toUpperCase() || 'U'}
                                     </div>
                                   )}
                                   <div className="truncate">
                                     <p className="font-medium text-slate-900 truncate flex items-center gap-1.5">
                                       {c.name}
-                                      {c.source === 'directory' && (
-                                        <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 text-[9px] font-semibold">
-                                          Org Directory
+                                      {isCoolaire && (
+                                        <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-800 text-[9px] font-bold">
+                                          🏢 Coolaire Org
                                         </span>
                                       )}
                                       {c.source === 'custom' && (
-                                        <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700 text-[9px] font-semibold">
+                                        <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[9px] font-semibold">
                                           Teammate
                                         </span>
                                       )}
+                                      {c.source === 'contacts' && !isCoolaire && (
+                                        <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 text-[9px] font-medium">
+                                          Contact
+                                        </span>
+                                      )}
                                     </p>
-                                    <p className="text-[10px] text-slate-400 truncate">{c.email}</p>
+                                    <div className="flex items-center gap-2 text-[10px] text-slate-400 truncate">
+                                      <span className="truncate">{c.email}</span>
+                                      {c.jobTitle && (
+                                        <span className="text-slate-500 font-medium truncate">
+                                          • {c.jobTitle}
+                                        </span>
+                                      )}
+                                      {c.department && (
+                                        <span className="text-slate-500 truncate">
+                                          ({c.department})
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
 
                                 {isCurrent ? (
                                   <span className="text-[10px] font-bold text-purple-700 flex items-center gap-0.5">
-                                    <Check className="w-3 h-3" /> Selected
+                                    <Check className="w-3.5 h-3.5" /> Selected
                                   </span>
                                 ) : (
-                                  <span className="text-[10px] text-purple-600 opacity-0 group-hover:opacity-100 font-medium">
+                                  <span className="text-[10px] text-blue-600 font-medium hover:underline">
                                     Assign
                                   </span>
                                 )}
