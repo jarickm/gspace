@@ -1,5 +1,28 @@
 import type { GoogleCalendarEvent } from '../types/gqueues';
 
+export interface CalendarEventAttendee {
+  email: string;
+  displayName?: string;
+}
+
+export interface CreateCalendarEventParams {
+  summary: string;
+  description?: string;
+  dueDate?: string; // YYYY-MM-DD or ISO
+  timeEstimate?: string;
+  attendees?: CalendarEventAttendee[];
+  sendUpdates?: 'all' | 'none' | 'externalOnly';
+}
+
+export interface UpdateCalendarEventParams {
+  summary?: string;
+  description?: string;
+  dueDate?: string;
+  timeEstimate?: string;
+  attendees?: CalendarEventAttendee[];
+  sendUpdates?: 'all' | 'none' | 'externalOnly';
+}
+
 export async function fetchCalendarEvents(
   accessToken: string,
   timeMin?: string,
@@ -41,12 +64,7 @@ export async function fetchCalendarEvents(
 
 export async function createCalendarEvent(
   accessToken: string,
-  params: {
-    summary: string;
-    description?: string;
-    dueDate?: string; // YYYY-MM-DD or ISO
-    timeEstimate?: string;
-  }
+  params: CreateCalendarEventParams
 ): Promise<GoogleCalendarEvent> {
   const dateStr = params.dueDate || new Date().toISOString().split('T')[0];
   const isDateTime = dateStr.includes('T');
@@ -65,9 +83,11 @@ export async function createCalendarEvent(
     end = { date: dateStr.split('T')[0] };
   }
 
-  const payload = {
+  const payload: any = {
     summary: `[GQueues] ${params.summary}`,
-    description: params.description ? `${params.description}\n\nSynced from GQueues Workspace Manager` : 'Synced from GQueues Workspace Manager',
+    description: params.description
+      ? `${params.description}\n\nSynced from GQueues Workspace Manager`
+      : 'Synced from GQueues Workspace Manager',
     start,
     end,
     reminders: {
@@ -75,7 +95,19 @@ export async function createCalendarEvent(
     },
   };
 
-  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+  // If attendees (e.g. assigned colleague) are provided, add them so the event appears on their calendar!
+  if (params.attendees && params.attendees.length > 0) {
+    payload.attendees = params.attendees.map((a) => ({
+      email: a.email,
+      displayName: a.displayName || a.email,
+    }));
+  }
+
+  // sendUpdates=all delivers the invitation email and adds it directly to the assignee's Google Calendar
+  const sendUpdatesParam = params.sendUpdates || (params.attendees?.length ? 'all' : 'none');
+  const query = `?sendUpdates=${sendUpdatesParam}`;
+
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events${query}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -100,12 +132,75 @@ export async function createCalendarEvent(
   };
 }
 
+export async function updateCalendarEvent(
+  accessToken: string,
+  eventId: string,
+  params: UpdateCalendarEventParams
+): Promise<GoogleCalendarEvent> {
+  const payload: any = {};
+
+  if (params.summary) {
+    payload.summary = `[GQueues] ${params.summary}`;
+  }
+
+  if (params.description !== undefined) {
+    payload.description = `${params.description}\n\nSynced from GQueues Workspace Manager`;
+  }
+
+  if (params.dueDate) {
+    const dateStr = params.dueDate;
+    const isDateTime = dateStr.includes('T');
+    payload.start = isDateTime ? { dateTime: dateStr } : { date: dateStr.split('T')[0] };
+    if (isDateTime) {
+      const startDate = new Date(dateStr);
+      payload.end = { dateTime: new Date(startDate.getTime() + 60 * 60 * 1000).toISOString() };
+    } else {
+      payload.end = { date: dateStr.split('T')[0] };
+    }
+  }
+
+  if (params.attendees) {
+    payload.attendees = params.attendees.map((a) => ({
+      email: a.email,
+      displayName: a.displayName || a.email,
+    }));
+  }
+
+  const sendUpdatesParam = params.sendUpdates || 'all';
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=${sendUpdatesParam}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Failed to update calendar event (${res.status}): ${error}`);
+  }
+
+  const updated = await res.json();
+  return {
+    id: updated.id,
+    summary: updated.summary,
+    description: updated.description,
+    start: updated.start,
+    end: updated.end,
+    htmlLink: updated.htmlLink,
+  };
+}
+
 export async function deleteCalendarEvent(
   accessToken: string,
   eventId: string
 ): Promise<void> {
   const res = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=all`,
     {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${accessToken}` },

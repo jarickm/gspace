@@ -260,6 +260,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                 {task.driveAttachments.length}
                               </span>
                             )}
+                            {task.calendarEventId && (
+                              <span className="flex items-center gap-0.5 text-amber-600" title="Synced with Google Calendar">
+                                <Calendar className="w-3 h-3" />
+                              </span>
+                            )}
                           </div>
 
                           {task.assignedContact && (

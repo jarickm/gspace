@@ -630,14 +630,22 @@ export const TaskList: React.FC<TaskListProps> = ({
                           </span>
                         )}
 
-                        {/* Calendar Sync indicator */}
+                        {/* Calendar Sync indicator with Assignee reflection */}
                         {task.calendarEventId && (
                           <span
-                            className="inline-flex items-center gap-1 text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded font-medium"
-                            title="Synced to Google Calendar"
+                            className="inline-flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold"
+                            title={
+                              task.assignedContact
+                                ? `Synced to Google Calendar & invited ${task.assignedContact.name} (${task.assignedContact.email})`
+                                : 'Synced to Google Calendar'
+                            }
                           >
-                            <Calendar className="w-3 h-3 text-blue-600" />
-                            <span>Synced</span>
+                            <Calendar className="w-3 h-3 text-amber-600" />
+                            <span>
+                              {task.assignedContact
+                                ? `On ${task.assignedContact.name.split(' ')[0]}’s Cal`
+                                : 'On Cal'}
+                            </span>
                           </span>
                         )}
                       </div>

@@ -30,6 +30,7 @@ import {
 import {
   fetchCalendarEvents,
   createCalendarEvent,
+  updateCalendarEvent,
   deleteCalendarEvent,
 } from './services/calendarApi';
 import { fetchContacts } from './services/peopleApi';
@@ -615,6 +616,22 @@ export default function App() {
         timeEstimate: updatedTask.timeEstimate,
         recurring: updatedTask.recurring,
       });
+
+      // If task has a synced calendar event, update event details and assignee invitation
+      if (updatedTask.calendarEventId) {
+        const attendees = updatedTask.assignedContact?.email
+          ? [{ email: updatedTask.assignedContact.email, displayName: updatedTask.assignedContact.name }]
+          : undefined;
+
+        updateCalendarEvent(token, updatedTask.calendarEventId, {
+          summary: updatedTask.title,
+          description: updatedTask.notes,
+          dueDate: updatedTask.due,
+          timeEstimate: updatedTask.timeEstimate,
+          attendees,
+          sendUpdates: 'all',
+        }).catch((err) => console.warn('Failed to update synced Google Calendar event:', err));
+      }
     } catch (err) {
       console.error('Failed to update task details:', err);
     }
@@ -863,11 +880,17 @@ export default function App() {
   const handleSyncTaskToCalendar = async (task: GQueueTask) => {
     if (!token) return;
     try {
+      const attendees = task.assignedContact?.email
+        ? [{ email: task.assignedContact.email, displayName: task.assignedContact.name }]
+        : undefined;
+
       const event = await createCalendarEvent(token, {
         summary: task.title,
         description: task.notes,
         dueDate: task.due,
         timeEstimate: task.timeEstimate,
+        attendees,
+        sendUpdates: 'all',
       });
 
       const updated: GQueueTask = { ...task, calendarEventId: event.id };
@@ -1119,6 +1142,12 @@ export default function App() {
           onOpenDrivePicker={() => setIsDrivePickerOpen(true)}
           onSyncCalendar={handleSyncTaskToCalendar}
           onUnsyncCalendar={handleUnsyncTaskFromCalendar}
+          onRefreshContacts={async () => {
+            if (token) {
+              const fresh = await fetchContacts(token);
+              setContacts(fresh);
+            }
+          }}
         />
       )}
 

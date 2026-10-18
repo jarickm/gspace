@@ -88,6 +88,8 @@ export interface GoogleContact {
   name: string;
   email: string;
   avatarUrl?: string;
+  jobTitle?: string;
+  source?: 'contacts' | 'directory' | 'other' | 'custom';
 }
 
 export interface GoogleDriveFile {
