@@ -1,65 +1,57 @@
 import React from 'react';
-import type { SmartQueueType } from '../types/gqueues';
+import type { SmartQueueType, ViewMode } from '../types/gqueues';
 import {
   ListTodo,
-  CalendarDays,
   Calendar,
-  Download,
   Plus,
-  Clock
+  Kanban,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface MobileBottomNavProps {
-  currentView: 'tasks' | 'calendar';
+  currentView: ViewMode;
   activeSmartQueue: SmartQueueType | null;
-  onSelectView: (view: 'tasks' | 'calendar') => void;
+  onSelectView: (view: ViewMode) => void;
   onOpenQueuesDrawer: () => void;
   onSelectToday: () => void;
   onQuickAddTask: () => void;
   onOpenInstallModal: () => void;
   todayCount: number;
+  completedCount?: number;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   currentView,
-  activeSmartQueue,
   onSelectView,
   onOpenQueuesDrawer,
-  onSelectToday,
   onQuickAddTask,
-  onOpenInstallModal,
-  todayCount,
+  completedCount = 0,
 }) => {
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white/95 backdrop-blur-md border-t border-slate-200/90 z-30 px-3 flex items-center justify-around shadow-lg">
-      {/* 1. All Queues / Drawer */}
-      <button
-        onClick={onOpenQueuesDrawer}
-        className="flex flex-col items-center justify-center gap-1 text-slate-600 hover:text-blue-600 active:scale-95 transition-all w-14"
-      >
-        <ListTodo className="w-5 h-5" />
-        <span className="text-[10px] font-semibold">Queues</span>
-      </button>
-
-      {/* 2. Today */}
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white/95 backdrop-blur-md border-t border-slate-200/90 z-30 px-2 flex items-center justify-around shadow-lg">
+      {/* 1. All Queues List */}
       <button
         onClick={() => {
           onSelectView('tasks');
-          onSelectToday();
+          onOpenQueuesDrawer();
         }}
-        className={`flex flex-col items-center justify-center gap-1 relative w-14 transition-all ${
-          currentView === 'tasks' && activeSmartQueue === 'today'
-            ? 'text-blue-600 font-bold'
-            : 'text-slate-600 hover:text-blue-600'
+        className={`flex flex-col items-center justify-center gap-1 active:scale-95 transition-all w-14 ${
+          currentView === 'tasks' ? 'text-blue-600 font-bold' : 'text-slate-600 hover:text-blue-600'
         }`}
       >
-        <CalendarDays className="w-5 h-5" />
-        <span className="text-[10px] font-semibold">Today</span>
-        {todayCount > 0 && (
-          <span className="absolute top-0 right-3 w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-bold flex items-center justify-center">
-            {todayCount}
-          </span>
-        )}
+        <ListTodo className="w-5 h-5" />
+        <span className="text-[10px]">Queues</span>
+      </button>
+
+      {/* 2. Kanban Board */}
+      <button
+        onClick={() => onSelectView('kanban')}
+        className={`flex flex-col items-center justify-center gap-1 w-14 transition-all ${
+          currentView === 'kanban' ? 'text-blue-600 font-bold' : 'text-slate-600 hover:text-blue-600'
+        }`}
+      >
+        <Kanban className="w-5 h-5" />
+        <span className="text-[10px]">Kanban</span>
       </button>
 
       {/* 3. Central FAB: + Add Task */}
@@ -75,22 +67,29 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       <button
         onClick={() => onSelectView('calendar')}
         className={`flex flex-col items-center justify-center gap-1 w-14 transition-all ${
-          currentView === 'calendar'
-            ? 'text-blue-600 font-bold'
-            : 'text-slate-600 hover:text-blue-600'
+          currentView === 'calendar' ? 'text-blue-600 font-bold' : 'text-slate-600 hover:text-blue-600'
         }`}
       >
         <Calendar className="w-5 h-5" />
-        <span className="text-[10px] font-semibold">Calendar</span>
+        <span className="text-[10px]">Calendar</span>
       </button>
 
-      {/* 5. Install App button */}
+      {/* 5. Completed Tasks */}
       <button
-        onClick={onOpenInstallModal}
-        className="flex flex-col items-center justify-center gap-1 text-slate-600 hover:text-emerald-600 active:scale-95 transition-all w-14"
+        onClick={() => onSelectView('completed')}
+        className={`flex flex-col items-center justify-center gap-1 relative w-14 transition-all ${
+          currentView === 'completed'
+            ? 'text-emerald-700 font-bold'
+            : 'text-slate-600 hover:text-emerald-600'
+        }`}
       >
-        <Download className="w-5 h-5 text-emerald-600" />
-        <span className="text-[10px] font-semibold text-emerald-700">Install</span>
+        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+        <span className="text-[10px]">Completed</span>
+        {completedCount > 0 && (
+          <span className="absolute top-0 right-2 w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] font-bold flex items-center justify-center">
+            {completedCount > 99 ? '99+' : completedCount}
+          </span>
+        )}
       </button>
     </nav>
   );

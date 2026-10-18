@@ -5,6 +5,8 @@ import type {
   GoogleContact,
   Subtask,
   DriveAttachment,
+  KanbanStatus,
+  RecurringSchedule,
 } from '../types/gqueues';
 import {
   Calendar,
@@ -20,7 +22,11 @@ import {
   X,
   ExternalLink,
   CalendarCheck,
-  AlertCircle
+  AlertCircle,
+  Repeat,
+  Timer,
+  Layers,
+  History
 } from 'lucide-react';
 
 interface TaskDetailModalProps {
@@ -61,10 +67,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [driveAttachments, setDriveAttachments] = useState<DriveAttachment[]>(
     task.driveAttachments || []
   );
+  const [kanbanStatus, setKanbanStatus] = useState<KanbanStatus>(task.kanbanStatus || 'todo');
+  const [recurring, setRecurring] = useState<RecurringSchedule>(task.recurring || 'none');
+  const [timeEstimate, setTimeEstimate] = useState<string>(task.timeEstimate || '');
+
   const [isSaving, setIsSaving] = useState(false);
   const [isCalendarSyncing, setIsCalendarSyncing] = useState(false);
 
-  // Keep attachments in sync if changed from drive picker
   React.useEffect(() => {
     setDriveAttachments(task.driveAttachments || []);
   }, [task.driveAttachments]);
@@ -111,16 +120,22 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const isDone = kanbanStatus === 'done' || task.status === 'completed';
       await onSave({
         title,
         notes,
         priority,
         starred,
-        due: due ? due : null as any,
+        due: due ? due : (null as any),
         tags,
         subtasks,
         assignedContact,
         driveAttachments,
+        kanbanStatus,
+        recurring,
+        timeEstimate,
+        status: isDone ? 'completed' : 'needsAction',
+        completedAt: isDone ? (task.completedAt || new Date().toISOString()) : undefined,
       });
       onClose();
     } catch (err) {
@@ -155,7 +170,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <Star className={`w-5 h-5 ${starred ? 'fill-amber-400' : ''}`} />
             </button>
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Task Details
+              Task Details & Workflow
             </span>
           </div>
 
@@ -177,7 +192,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
           {/* Title */}
           <div>
             <input
@@ -189,8 +204,45 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             />
           </div>
 
-          {/* Quick Properties Bar: Due Date & Priority */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 bg-slate-50/90 rounded-xl border border-slate-200/80">
+          {/* Properties Grid: Workflow Stage, Priority, Due Date, Time Estimate, Recurring */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-50/90 rounded-xl border border-slate-200/80">
+            {/* Kanban Stage */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
+                <Layers className="w-3.5 h-3.5 text-blue-600" />
+                Workflow Stage
+              </label>
+              <select
+                value={kanbanStatus}
+                onChange={(e) => setKanbanStatus(e.target.value as KanbanStatus)}
+                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-medium"
+              >
+                <option value="todo">📝 To Do / Queued</option>
+                <option value="in_progress">⚡ In Progress</option>
+                <option value="waiting">⏳ Waiting / Blocked</option>
+                <option value="done">✅ Done / Completed</option>
+              </select>
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                Priority
+              </label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as Priority)}
+                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500"
+              >
+                <option value="none">No Priority</option>
+                <option value="low">Low Priority</option>
+                <option value="medium">Medium Priority</option>
+                <option value="high">High Priority</option>
+                <option value="urgent">🔴 Urgent Priority</option>
+              </select>
+            </div>
+
             {/* Due Date */}
             <div>
               <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
@@ -224,7 +276,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     onClick={() => handleQuickDue(7)}
                     className="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-medium"
                   >
-                    Next Week
+                    +7 Days
                   </button>
                   {due && (
                     <button
@@ -239,37 +291,53 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Priority */}
-            <div>
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                Priority
-              </label>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as Priority)}
-                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500"
-              >
-                <option value="none">No Priority</option>
-                <option value="low">Low Priority</option>
-                <option value="medium">Medium Priority</option>
-                <option value="high">High Priority</option>
-                <option value="urgent">Urgent Priority</option>
-              </select>
+            {/* Recurring & Time Estimate */}
+            <div className="space-y-2">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
+                  <Repeat className="w-3.5 h-3.5 text-emerald-600" />
+                  Repeat / Recurring
+                </label>
+                <select
+                  value={recurring}
+                  onChange={(e) => setRecurring(e.target.value as RecurringSchedule)}
+                  className="w-full px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500"
+                >
+                  <option value="none">Does not repeat</option>
+                  <option value="daily">Repeats Daily</option>
+                  <option value="weekly">Repeats Weekly</option>
+                  <option value="monthly">Repeats Monthly</option>
+                  <option value="yearly">Repeats Yearly</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                  <Timer className="w-3.5 h-3.5 text-purple-600" />
+                  Time Estimate
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 30m, 2h, 1d"
+                  value={timeEstimate}
+                  onChange={(e) => setTimeEstimate(e.target.value)}
+                  className="w-full px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500"
+                />
+              </div>
             </div>
           </div>
 
           {/* Description & Notes */}
           <div>
             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-              Description & Notes
+              Description & Rich Notes
             </label>
             <textarea
               rows={4}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Add details, instructions, or context for this task..."
-              className="w-full p-3 text-xs sm:text-sm bg-slate-50/50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all resize-y placeholder:text-slate-400"
+              placeholder="Add details, instructions, links, or context for this task..."
+              className="w-full p-3 text-xs sm:text-sm bg-slate-50/50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all resize-y placeholder:text-slate-400 font-mono"
             />
           </div>
 
@@ -277,7 +345,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           <div>
             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
               <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
-              Subtasks ({subtasks.filter((s) => s.completed).length}/{subtasks.length})
+              Subtasks Checklist ({subtasks.filter((s) => s.completed).length}/{subtasks.length})
             </label>
 
             <div className="space-y-1.5 mb-3">
@@ -328,7 +396,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 disabled={!newSubtaskTitle.trim()}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
               >
-                <Plus className="w-3.5 h-3.5" /> Add
+                <Plus className="w-3.5 h-3.5" /> Add Step
               </button>
             </form>
           </div>
@@ -337,7 +405,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           <div>
             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
               <Tag className="w-3.5 h-3.5 text-blue-600" />
-              Tags
+              Tags & Labels
             </label>
 
             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -363,7 +431,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 type="text"
                 value={newTagInput}
                 onChange={(e) => setNewTagInput(e.target.value)}
-                placeholder="New tag (e.g. client, launch)"
+                placeholder="New tag (e.g. client, urgent, review)"
                 className="flex-1 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
               />
               <button
@@ -371,7 +439,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 disabled={!newTagInput.trim()}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 rounded-lg text-xs font-medium"
               >
-                Add
+                Add Tag
               </button>
             </form>
           </div>
@@ -540,6 +608,15 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Activity History Footer */}
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 text-[11px] text-slate-400 flex items-center gap-2">
+            <History className="w-3.5 h-3.5 text-slate-400" />
+            <span>
+              Updated: {new Date(task.updated).toLocaleString()}
+              {task.completedAt && ` • Finished: ${new Date(task.completedAt).toLocaleString()}`}
+            </span>
           </div>
         </div>
 

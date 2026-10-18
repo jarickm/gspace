@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { User } from 'firebase/auth';
+import type { ViewMode } from '../types/gqueues';
 import {
   Search,
   Plus,
@@ -10,8 +11,12 @@ import {
   Menu,
   X,
   ChevronDown,
-  CloudCheck,
-  Download
+  Download,
+  Kanban,
+  CheckCircle2,
+  FileDown,
+  Keyboard,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -24,10 +29,13 @@ interface HeaderProps {
   onOpenInstallModal: () => void;
   isSyncing: boolean;
   onRefresh: () => void;
-  currentView: 'tasks' | 'calendar';
-  onViewChange: (view: 'tasks' | 'calendar') => void;
+  currentView: ViewMode;
+  onViewChange: (view: ViewMode) => void;
   onToggleMobileSidebar: () => void;
   isMobileSidebarOpen: boolean;
+  completedCount?: number;
+  onOpenExportModal?: () => void;
+  onOpenShortcutsModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,6 +52,9 @@ export const Header: React.FC<HeaderProps> = ({
   onViewChange,
   onToggleMobileSidebar,
   isMobileSidebarOpen,
+  completedCount = 0,
+  onOpenExportModal,
+  onOpenShortcutsModal,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
@@ -59,7 +70,10 @@ export const Header: React.FC<HeaderProps> = ({
           {isMobileSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
 
-        <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => onViewChange('tasks')}>
+        <div
+          className="flex items-center gap-2.5 cursor-pointer"
+          onClick={() => onViewChange('tasks')}
+        >
           <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-xs">
             GQ
           </div>
@@ -82,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search queues, tasks, notes, or #tags..."
+            placeholder="Search queues, tasks, notes, or #tags (Press /)..."
             className="w-full pl-9 pr-4 py-1.5 text-xs sm:text-sm bg-slate-100/80 hover:bg-slate-100 focus:bg-white border border-transparent focus:border-blue-500 rounded-lg outline-none transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
@@ -98,6 +112,88 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Actions */}
       <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* View Switcher: 4 Modes: Queues, Kanban, Calendar, Completed */}
+        <div className="hidden lg:flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 text-xs font-medium text-slate-600">
+          <button
+            onClick={() => onViewChange('tasks')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+              currentView === 'tasks'
+                ? 'bg-white text-blue-700 shadow-xs font-semibold'
+                : 'hover:text-slate-900'
+            }`}
+            title="Standard Queues list view"
+          >
+            <ListTodo className="w-3.5 h-3.5" />
+            <span>Queues</span>
+          </button>
+
+          <button
+            onClick={() => onViewChange('kanban')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+              currentView === 'kanban'
+                ? 'bg-white text-blue-700 shadow-xs font-semibold'
+                : 'hover:text-slate-900'
+            }`}
+            title="Kanban status board (To Do, In Progress, Waiting, Done)"
+          >
+            <Kanban className="w-3.5 h-3.5" />
+            <span>Kanban</span>
+          </button>
+
+          <button
+            onClick={() => onViewChange('calendar')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+              currentView === 'calendar'
+                ? 'bg-white text-blue-700 shadow-xs font-semibold'
+                : 'hover:text-slate-900'
+            }`}
+            title="Calendar grid schedule view"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Calendar</span>
+          </button>
+
+          <button
+            onClick={() => onViewChange('completed')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+              currentView === 'completed'
+                ? 'bg-white text-emerald-700 shadow-xs font-semibold'
+                : 'hover:text-slate-900'
+            }`}
+            title="View all completed tasks across Workspace"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Completed</span>
+            {completedCount > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-100 text-emerald-800 font-bold">
+                {completedCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Export action */}
+        {onOpenExportModal && (
+          <button
+            onClick={onOpenExportModal}
+            className="hidden sm:flex items-center gap-1 p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            title="Export tasks (CSV, JSON, Print)"
+          >
+            <FileDown className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Shortcuts button */}
+        {onOpenShortcutsModal && (
+          <button
+            onClick={onOpenShortcutsModal}
+            className="hidden xl:flex items-center gap-1 p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard className="w-4 h-4" />
+          </button>
+        )}
+
         {/* Install App button (Prominent) */}
         <button
           onClick={onOpenInstallModal}
@@ -107,32 +203,6 @@ export const Header: React.FC<HeaderProps> = ({
           <Download className="w-3.5 h-3.5 text-emerald-600" />
           <span>Install App</span>
         </button>
-
-        {/* View Switcher: List vs Calendar */}
-        <div className="hidden md:flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 text-xs font-medium text-slate-600">
-          <button
-            onClick={() => onViewChange('tasks')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
-              currentView === 'tasks'
-                ? 'bg-white text-blue-700 shadow-xs font-semibold'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            <ListTodo className="w-3.5 h-3.5" />
-            <span>Queues</span>
-          </button>
-          <button
-            onClick={() => onViewChange('calendar')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
-              currentView === 'calendar'
-                ? 'bg-white text-blue-700 shadow-xs font-semibold'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Calendar</span>
-          </button>
-        </div>
 
         {/* Sync Status Button */}
         <button
@@ -157,7 +227,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="relative">
           <button
             onClick={() => setShowProfileMenu(!showProfileMenu)}
-            className="flex items-center gap-1.5 p-1 rounded-full hover:ring-2 hover:ring-blue-200 transition-all"
+            className="flex items-center gap-1.5 p-1 rounded-full hover:ring-2 hover:ring-blue-200 transition-all cursor-pointer"
           >
             {user?.photoURL ? (
               <img
@@ -181,9 +251,64 @@ export const Header: React.FC<HeaderProps> = ({
                 </p>
                 <p className="text-[11px] text-slate-500 truncate">{user?.email}</p>
                 <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  Connected to Google Cloud
+                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                  <span>Real Google Tasks & Calendar Sync</span>
                 </div>
+              </div>
+
+              {/* View Switchers for mobile/tablet */}
+              <div className="lg:hidden py-1 border-b border-slate-100">
+                <p className="px-4 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Switch View
+                </p>
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    onViewChange('tasks');
+                  }}
+                  className={`w-full text-left px-4 py-1.5 text-xs flex items-center gap-2 ${
+                    currentView === 'tasks' ? 'text-blue-600 font-semibold bg-blue-50/50' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <ListTodo className="w-3.5 h-3.5" />
+                  <span>Queues List</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    onViewChange('kanban');
+                  }}
+                  className={`w-full text-left px-4 py-1.5 text-xs flex items-center gap-2 ${
+                    currentView === 'kanban' ? 'text-blue-600 font-semibold bg-blue-50/50' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Kanban className="w-3.5 h-3.5" />
+                  <span>Kanban Board</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    onViewChange('calendar');
+                  }}
+                  className={`w-full text-left px-4 py-1.5 text-xs flex items-center gap-2 ${
+                    currentView === 'calendar' ? 'text-blue-600 font-semibold bg-blue-50/50' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Calendar Schedule</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    onViewChange('completed');
+                  }}
+                  className={`w-full text-left px-4 py-1.5 text-xs flex items-center gap-2 ${
+                    currentView === 'completed' ? 'text-emerald-700 font-semibold bg-emerald-50/50' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Completed Tasks ({completedCount})</span>
+                </button>
               </div>
 
               <div className="py-1">
@@ -197,6 +322,18 @@ export const Header: React.FC<HeaderProps> = ({
                   <Plus className="w-3.5 h-3.5 text-slate-500" />
                   <span>Create New Queue</span>
                 </button>
+                {onOpenExportModal && (
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onOpenExportModal();
+                    }}
+                    className="w-full text-left px-4 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <FileDown className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Export Tasks (CSV/JSON)</span>
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setShowProfileMenu(false);
@@ -207,16 +344,18 @@ export const Header: React.FC<HeaderProps> = ({
                   <Download className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Install App (APK/iOS/Win)</span>
                 </button>
-                <button
-                  onClick={() => {
-                    setShowProfileMenu(false);
-                    onViewChange(currentView === 'tasks' ? 'calendar' : 'tasks');
-                  }}
-                  className="sm:hidden w-full text-left px-4 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                >
-                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Switch to {currentView === 'tasks' ? 'Calendar View' : 'Queue View'}</span>
-                </button>
+                {onOpenShortcutsModal && (
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onOpenShortcutsModal();
+                    }}
+                    className="w-full text-left px-4 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <Keyboard className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Keyboard Shortcuts (?)</span>
+                  </button>
+                )}
               </div>
 
               <div className="border-t border-slate-100 pt-1">

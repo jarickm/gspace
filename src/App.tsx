@@ -4,7 +4,6 @@ import {
   initAuth,
   googleSignIn,
   logout,
-  getAccessToken,
 } from './services/firebase';
 import type {
   QueueList,
@@ -14,6 +13,8 @@ import type {
   GoogleCalendarEvent,
   DriveAttachment,
   Priority,
+  ViewMode,
+  KanbanStatus,
 } from './types/gqueues';
 import {
   fetchTaskLists,
@@ -37,12 +38,16 @@ import { AuthScreen } from './components/AuthScreen';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { TaskList } from './components/TaskList';
+import { KanbanBoard } from './components/KanbanBoard';
 import { CalendarView } from './components/CalendarView';
+import { CompletedView } from './components/CompletedView';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { DrivePickerModal } from './components/DrivePickerModal';
 import { NewQueueModal } from './components/NewQueueModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { InstallModal } from './components/InstallModal';
+import { ExportModal } from './components/ExportModal';
+import { ShortcutsModal } from './components/ShortcutsModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { OfflineIndicator } from './components/OfflineIndicator';
 
@@ -67,9 +72,11 @@ export default function App() {
   // UI state
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [currentView, setCurrentView] = useState<'tasks' | 'calendar'>('tasks');
+  const [currentView, setCurrentView] = useState<ViewMode>('tasks');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
 
   // Modals state
   const [selectedTaskForDetail, setSelectedTaskForDetail] = useState<GQueueTask | null>(null);
@@ -118,7 +125,7 @@ export default function App() {
     try {
       const res = await googleSignIn();
       if (res) {
-        setUser(res.user);
+        setUser(res.user as User);
         setToken(res.accessToken);
       }
     } catch (err: any) {
@@ -126,12 +133,11 @@ export default function App() {
         err?.code === 'auth/popup-closed-by-user' ||
         err?.code === 'auth/cancelled-popup-request'
       ) {
-        // User closed popup or cancelled prompt
         return;
       }
       if (err?.code === 'auth/popup-blocked') {
         setAuthError(
-          'Sign-in popup was blocked by your browser. Please allow popups or open the app in a new tab.'
+          'Sign-in popup was blocked by your browser. Please allow popups or open the app in a new window.'
         );
         return;
       }
@@ -208,10 +214,60 @@ export default function App() {
     }
   }, [token, loadInitialWorkspaceData]);
 
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
+        if (e.key === 'Escape') {
+          target.blur();
+        }
+        return;
+      }
+
+      if (e.key === '?') {
+        setIsShortcutsModalOpen((prev) => !prev);
+      } else if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        const el = document.querySelector('input[placeholder*="Add a task"]') as HTMLInputElement;
+        if (el) el.focus();
+      } else if (e.key === 'q' || e.key === 'Q') {
+        e.preventDefault();
+        handleOpenNewQueueModal();
+      } else if (e.key === '/') {
+        e.preventDefault();
+        const searchEl = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
+        if (searchEl) searchEl.focus();
+      } else if (e.key === '1') {
+        setCurrentView('tasks');
+      } else if (e.key === '2') {
+        setCurrentView('kanban');
+      } else if (e.key === '3') {
+        setCurrentView('calendar');
+      } else if (e.key === '4') {
+        setCurrentView('completed');
+      } else if (e.key === 't' || e.key === 'T') {
+        handleSelectSmartQueue('today');
+      } else if (e.key === 'r' || e.key === 'R') {
+        handleRefresh();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Load tasks when active queue changes
   const handleSelectQueue = async (queueId: string) => {
     setActiveQueueId(queueId);
     setActiveSmartQueue(null);
+    if (currentView === 'completed') {
+      setCurrentView('tasks');
+    }
     if (!token) return;
 
     // Use cache if available first, then refresh
@@ -234,6 +290,14 @@ export default function App() {
 
   // Handle Smart Queue selection
   const handleSelectSmartQueue = (smart: SmartQueueType) => {
+    if (smart === 'completed') {
+      setCurrentView('completed');
+      setActiveSmartQueue(null);
+      return;
+    }
+    if (currentView === 'completed') {
+      setCurrentView('tasks');
+    }
     setActiveSmartQueue(smart);
     setActiveQueueId(null);
   };
@@ -266,10 +330,15 @@ export default function App() {
     let starredCount = 0;
     let allActiveCount = 0;
     let completedCount = 0;
+    let todayCompleted = 0;
 
     for (const t of allTasksCombined) {
       if (t.status === 'completed') {
         completedCount++;
+        const finishedDate = (t.completed || t.completedAt || t.updated || '').split('T')[0];
+        if (finishedDate === today) {
+          todayCompleted++;
+        }
         continue;
       }
 
@@ -298,6 +367,7 @@ export default function App() {
       starred: starredCount,
       all: allActiveCount,
       completed: completedCount,
+      todayCompleted,
     };
   }, [allTasksCombined]);
 
@@ -390,17 +460,42 @@ export default function App() {
     }
   };
 
+  // Quick Add Kanban Task in specific column
+  const handleQuickAddKanbanTask = async (title: string, status: KanbanStatus) => {
+    const targetQueueId = activeQueueId || queues[0]?.id;
+    if (!token || !targetQueueId) return;
+
+    try {
+      const isDone = status === 'done';
+      const created = await createTask(token, targetQueueId, {
+        title,
+        status: isDone ? 'completed' : 'needsAction',
+        kanbanStatus: status,
+      });
+
+      setTasks((prev) => [created, ...prev]);
+      setAllTasksCache((prev) => ({
+        ...prev,
+        [targetQueueId]: [created, ...(prev[targetQueueId] || [])],
+      }));
+    } catch (err) {
+      console.error('Failed to add kanban task:', err);
+    }
+  };
+
   // Toggle Complete / Uncomplete
   const handleToggleComplete = async (task: GQueueTask) => {
     if (!token) return;
     const newStatus = task.status === 'completed' ? 'needsAction' : 'completed';
     const completedDate = newStatus === 'completed' ? new Date().toISOString() : undefined;
+    const newKanbanStatus: KanbanStatus = newStatus === 'completed' ? 'done' : 'todo';
 
     // Optimistic UI update
     const updated: GQueueTask = {
       ...task,
       status: newStatus,
       completed: completedDate,
+      kanbanStatus: newKanbanStatus,
     };
 
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
@@ -413,10 +508,11 @@ export default function App() {
       await updateTask(token, task.listId, task.id, {
         status: newStatus,
         completed: completedDate,
+        kanbanStatus: newKanbanStatus,
       });
     } catch (err) {
-      console.error('Failed to update task completion:', err);
-      // Revert if error
+      console.error('Failed to update task status in Google Tasks:', err);
+      // Revert optimistic update on failure
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
     }
   };
@@ -424,9 +520,8 @@ export default function App() {
   // Toggle Star / Flag
   const handleToggleStar = async (task: GQueueTask) => {
     if (!token) return;
-    const newStarred = !task.starred;
+    const updated: GQueueTask = { ...task, starred: !task.starred };
 
-    const updated: GQueueTask = { ...task, starred: newStarred };
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     setAllTasksCache((prev) => ({
       ...prev,
@@ -434,35 +529,98 @@ export default function App() {
     }));
 
     try {
-      await updateTask(token, task.listId, task.id, { starred: newStarred });
+      await updateTask(token, task.listId, task.id, { starred: updated.starred });
     } catch (err) {
-      console.error('Failed to update star:', err);
+      console.error('Failed to star task:', err);
     }
   };
 
-  // Save task details from modal
-  const handleSaveTaskDetail = async (updatedFields: Partial<GQueueTask>) => {
-    if (!token || !selectedTaskForDetail) return;
-    const targetTask = selectedTaskForDetail;
+  // Update Task Priority inline
+  const handleUpdateTaskPriority = async (task: GQueueTask, priority: Priority) => {
+    if (!token) return;
+    const updated: GQueueTask = { ...task, priority };
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    setAllTasksCache((prev) => ({
+      ...prev,
+      [task.listId]: (prev[task.listId] || []).map((t) => (t.id === task.id ? updated : t)),
+    }));
+
+    try {
+      await updateTask(token, task.listId, task.id, { priority });
+    } catch (err) {
+      console.error('Failed to update priority:', err);
+    }
+  };
+
+  // Update Task Kanban Status
+  const handleUpdateTaskKanbanStatus = async (task: GQueueTask, newStatus: KanbanStatus) => {
+    if (!token) return;
+    const isNowDone = newStatus === 'done';
+    const newGoogleStatus = isNowDone ? 'completed' : 'needsAction';
+    const completedDate = isNowDone ? (task.completed || new Date().toISOString()) : undefined;
 
     const updated: GQueueTask = {
-      ...targetTask,
+      ...task,
+      kanbanStatus: newStatus,
+      status: newGoogleStatus,
+      completed: completedDate,
+    };
+
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    setAllTasksCache((prev) => ({
+      ...prev,
+      [task.listId]: (prev[task.listId] || []).map((t) => (t.id === task.id ? updated : t)),
+    }));
+
+    try {
+      await updateTask(token, task.listId, task.id, {
+        status: newGoogleStatus,
+        kanbanStatus: newStatus,
+        completed: completedDate,
+      });
+    } catch (err) {
+      console.error('Failed to update kanban status:', err);
+    }
+  };
+
+  // Save Task Details from Modal
+  const handleSaveTaskDetail = async (updatedFields: Partial<GQueueTask>) => {
+    if (!token || !selectedTaskForDetail) return;
+
+    const updatedTask: GQueueTask = {
+      ...selectedTaskForDetail,
       ...updatedFields,
     };
 
-    setTasks((prev) => prev.map((t) => (t.id === targetTask.id ? updated : t)));
+    setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
     setAllTasksCache((prev) => ({
       ...prev,
-      [targetTask.listId]: (prev[targetTask.listId] || []).map((t) =>
-        t.id === targetTask.id ? updated : t
+      [updatedTask.listId]: (prev[updatedTask.listId] || []).map((t) =>
+        t.id === updatedTask.id ? updatedTask : t
       ),
     }));
+    setSelectedTaskForDetail(updatedTask);
 
-    await updateTask(token, targetTask.listId, targetTask.id, updatedFields);
-    setSelectedTaskForDetail(null);
+    try {
+      await updateTask(token, updatedTask.listId, updatedTask.id, {
+        title: updatedTask.title,
+        notes: updatedTask.notes,
+        due: updatedTask.due,
+        priority: updatedTask.priority,
+        tags: updatedTask.tags,
+        starred: updatedTask.starred,
+        subtasks: updatedTask.subtasks,
+        assignedContact: updatedTask.assignedContact,
+        driveAttachments: updatedTask.driveAttachments,
+        timeEstimate: updatedTask.timeEstimate,
+        recurring: updatedTask.recurring,
+      });
+    } catch (err) {
+      console.error('Failed to update task details:', err);
+    }
   };
 
-  // Subtask Toggle
+  // Subtask checkbox toggle
   const handleToggleSubtask = async (task: GQueueTask, subtaskId: string) => {
     if (!token) return;
     const updatedSubtasks = task.subtasks.map((s) =>
@@ -483,12 +641,13 @@ export default function App() {
     }
   };
 
-  // Add Subtask
+  // Add new subtask inline
   const handleAddSubtask = async (task: GQueueTask, subtaskTitle: string) => {
-    if (!token) return;
+    if (!token || !subtaskTitle.trim()) return;
+
     const newSub = {
-      id: 'sub-' + Date.now(),
-      title: subtaskTitle,
+      id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: subtaskTitle.trim(),
       completed: false,
     };
     const updatedSubtasks = [...task.subtasks, newSub];
@@ -505,6 +664,64 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  // Batch Complete
+  const handleBatchComplete = async (selectedList: GQueueTask[]) => {
+    if (!token || selectedList.length === 0) return;
+    const completedDate = new Date().toISOString();
+    const selectedIds = new Set(selectedList.map((t) => t.id));
+
+    setTasks((prev) =>
+      prev.map((t) =>
+        selectedIds.has(t.id) ? { ...t, status: 'completed', completed: completedDate } : t
+      )
+    );
+    setAllTasksCache((prev) => {
+      const copy = { ...prev };
+      for (const qId of Object.keys(copy)) {
+        copy[qId] = copy[qId].map((t) =>
+          selectedIds.has(t.id) ? { ...t, status: 'completed', completed: completedDate } : t
+        );
+      }
+      return copy;
+    });
+
+    for (const t of selectedList) {
+      updateTask(token, t.listId, t.id, { status: 'completed', completed: completedDate }).catch(
+        console.error
+      );
+    }
+  };
+
+  // Batch Delete
+  const handleBatchDelete = (selectedList: GQueueTask[]) => {
+    if (selectedList.length === 0) return;
+    setConfirmModalConfig({
+      isOpen: true,
+      title: `Delete ${selectedList.length} Tasks from Google Workspace`,
+      message: `Are you sure you want to permanently delete ${selectedList.length} tasks from your Google Workspace? This cannot be undone.`,
+      confirmLabel: 'Delete All',
+      isDestructive: true,
+      onConfirm: async () => {
+        setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }));
+        if (!token) return;
+
+        const idsToDelete = new Set(selectedList.map((t) => t.id));
+        setTasks((prev) => prev.filter((t) => !idsToDelete.has(t.id)));
+        setAllTasksCache((prev) => {
+          const copy = { ...prev };
+          for (const qId of Object.keys(copy)) {
+            copy[qId] = copy[qId].filter((t) => !idsToDelete.has(t.id));
+          }
+          return copy;
+        });
+
+        for (const t of selectedList) {
+          deleteTask(token, t.listId, t.id).catch(console.error);
+        }
+      },
+    });
   };
 
   // Task Delete (Mandatory Confirmation Modal)
@@ -742,7 +959,6 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onQuickAddTask={() => {
-          // Focus quick add or open prompt
           const el = document.querySelector('input[placeholder*="Add a task"]') as HTMLInputElement;
           if (el) el.focus();
         }}
@@ -754,9 +970,12 @@ export default function App() {
         onViewChange={setCurrentView}
         onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
         isMobileSidebarOpen={isMobileSidebarOpen}
+        completedCount={smartCounts.completed}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
+        onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
       />
 
-      {/* Main Layout Area (with padding bottom on mobile for Bottom Nav) */}
+      {/* Main Layout Area */}
       <div className="flex-1 flex overflow-hidden pb-16 md:pb-0">
         {/* Left Sidebar */}
         <Sidebar
@@ -764,6 +983,8 @@ export default function App() {
           activeQueueId={activeQueueId}
           activeSmartQueue={activeSmartQueue}
           selectedTag={selectedTag}
+          currentView={currentView}
+          onViewChange={setCurrentView}
           onSelectQueue={handleSelectQueue}
           onSelectSmartQueue={handleSelectSmartQueue}
           onSelectTag={setSelectedTag}
@@ -777,9 +998,9 @@ export default function App() {
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
 
-        {/* Center / Right Content: TaskList or CalendarView */}
+        {/* Center / Right Content: 4 Main Views */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          {currentView === 'tasks' ? (
+          {currentView === 'tasks' && (
             <TaskList
               currentQueue={currentQueue}
               smartQueueType={activeSmartQueue}
@@ -796,8 +1017,27 @@ export default function App() {
               onEditQueue={handleEditQueueModal}
               onToggleSubtask={handleToggleSubtask}
               onAddSubtask={handleAddSubtask}
+              onUpdatePriority={handleUpdateTaskPriority}
+              onBatchComplete={handleBatchComplete}
+              onBatchDelete={handleBatchDelete}
+              onOpenCompletedView={() => setCurrentView('completed')}
+              onOpenKanbanView={() => setCurrentView('kanban')}
             />
-          ) : (
+          )}
+
+          {currentView === 'kanban' && (
+            <KanbanBoard
+              tasks={activeQueueId ? tasks : allTasksCombined}
+              queues={queues}
+              currentQueue={currentQueue}
+              onSelectTask={setSelectedTaskForDetail}
+              onUpdateTaskStatus={handleUpdateTaskKanbanStatus}
+              onQuickAddTask={handleQuickAddKanbanTask}
+              onToggleComplete={handleToggleComplete}
+            />
+          )}
+
+          {currentView === 'calendar' && (
             <CalendarView
               tasks={allTasksCombined}
               calendarEvents={calendarEvents}
@@ -808,10 +1048,47 @@ export default function App() {
               }}
             />
           )}
+
+          {currentView === 'completed' && (
+            <CompletedView
+              tasks={allTasksCombined}
+              queues={queues}
+              onUncompleteTask={handleToggleComplete}
+              onDeleteTask={handleDeleteTaskPrompt}
+              onSelectTask={setSelectedTaskForDetail}
+              onClearAllCompleted={() => {
+                setConfirmModalConfig({
+                  isOpen: true,
+                  title: 'Clear All Completed Tasks',
+                  message:
+                    'Permanently clear all completed tasks across all Google Workspace queues? This will remove finished items from Google Tasks.',
+                  confirmLabel: 'Clear All Completed',
+                  isDestructive: true,
+                  onConfirm: async () => {
+                    setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }));
+                    if (!token) return;
+
+                    setTasks((prev) => prev.filter((t) => t.status !== 'completed'));
+                    setAllTasksCache((prev) => {
+                      const copy = { ...prev };
+                      for (const qId of Object.keys(copy)) {
+                        copy[qId] = copy[qId].filter((t) => t.status !== 'completed');
+                      }
+                      return copy;
+                    });
+
+                    for (const q of queues) {
+                      clearCompletedTasks(token, q.id).catch(console.error);
+                    }
+                  },
+                });
+              }}
+            />
+          )}
         </main>
       </div>
 
-      {/* Mobile Bottom Navigation (Visible on mobile screens) */}
+      {/* Mobile Bottom Navigation */}
       <MobileBottomNav
         currentView={currentView}
         activeSmartQueue={activeSmartQueue}
@@ -827,6 +1104,7 @@ export default function App() {
         }}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         todayCount={smartCounts.today}
+        completedCount={smartCounts.completed}
       />
 
       {/* Task Details Drawer/Modal */}
@@ -869,6 +1147,21 @@ export default function App() {
         />
       )}
 
+      {/* Export Tasks Modal */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        tasks={allTasksCombined}
+        queues={queues}
+        currentQueue={currentQueue}
+      />
+
+      {/* Keyboard Shortcuts Modal */}
+      <ShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+      />
+
       {/* PWA Install Modal (APK / iOS / Windows) */}
       <InstallModal
         isOpen={isInstallModalOpen}
@@ -878,7 +1171,7 @@ export default function App() {
       {/* Offline Status Toast Indicator */}
       <OfflineIndicator />
 
-      {/* Destructive Action User Confirmation Modal (MANDATORY) */}
+      {/* Destructive Action User Confirmation Modal */}
       <ConfirmModal
         isOpen={confirmModalConfig.isOpen}
         title={confirmModalConfig.title}

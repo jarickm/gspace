@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import type { QueueList, SmartQueueType } from '../types/gqueues';
+import React, { useState, useMemo } from 'react';
+import type { QueueList, SmartQueueType, ViewMode } from '../types/gqueues';
 import {
   CalendarDays,
   Clock,
@@ -18,7 +18,9 @@ import {
   Sparkles,
   ShieldCheck,
   Calendar,
-  Download
+  Download,
+  CheckCircle2,
+  TrendingUp,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -26,6 +28,8 @@ interface SidebarProps {
   activeQueueId: string | null;
   activeSmartQueue: SmartQueueType | null;
   selectedTag: string | null;
+  currentView?: ViewMode;
+  onViewChange?: (view: ViewMode) => void;
   onSelectQueue: (queueId: string) => void;
   onSelectSmartQueue: (smart: SmartQueueType) => void;
   onSelectTag: (tag: string | null) => void;
@@ -41,6 +45,7 @@ interface SidebarProps {
     starred: number;
     all: number;
     completed: number;
+    todayCompleted?: number;
   };
   isMobileOpen: boolean;
   onCloseMobile: () => void;
@@ -51,6 +56,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeQueueId,
   activeSmartQueue,
   selectedTag,
+  currentView,
+  onViewChange,
   onSelectQueue,
   onSelectSmartQueue,
   onSelectTag,
@@ -159,17 +166,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <nav className="space-y-0.5">
               {smartQueueItems.map((item) => {
-                const isActive = activeSmartQueue === item.type;
+                const isCompletedTab = item.type === 'completed';
+                const isActive = isCompletedTab
+                  ? currentView === 'completed'
+                  : activeSmartQueue === item.type && currentView !== 'completed';
+
                 return (
                   <button
                     key={item.type}
                     onClick={() => {
-                      onSelectSmartQueue(item.type);
+                      if (isCompletedTab) {
+                        if (onViewChange) onViewChange('completed');
+                      } else {
+                        if (onViewChange && currentView === 'completed') {
+                          onViewChange('tasks');
+                        }
+                        onSelectSmartQueue(item.type);
+                      }
                       onCloseMobile();
                     }}
-                    className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                       isActive
-                        ? 'bg-blue-100/80 text-blue-900 font-semibold shadow-xs'
+                        ? 'bg-blue-100/90 text-blue-900 font-semibold shadow-xs'
                         : 'text-slate-700 hover:bg-slate-200/60'
                     }`}
                   >
@@ -377,6 +395,62 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
           )}
+
+          {/* Productivity & Completed Tasks Summary Card */}
+          <div className="mx-2 p-3 bg-white rounded-xl border border-slate-200/90 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Productivity
+              </span>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                {counts.completed} Done
+              </span>
+            </div>
+
+            <div className="space-y-1 text-[11px] text-slate-600">
+              <div className="flex justify-between items-center">
+                <span>Completed today:</span>
+                <span className="font-bold text-slate-900">{counts.todayCompleted ?? 0}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Active tasks:</span>
+                <span className="font-bold text-slate-900">{counts.all}</span>
+              </div>
+              {counts.all + counts.completed > 0 && (
+                <div className="pt-1">
+                  <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                    <span>Completion rate</span>
+                    <span className="font-semibold text-emerald-700">
+                      {Math.round((counts.completed / (counts.all + counts.completed)) * 100)}%
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all"
+                      style={{
+                        width: `${Math.round(
+                          (counts.completed / (counts.all + counts.completed)) * 100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {onViewChange && (
+              <button
+                onClick={() => {
+                  onViewChange('completed');
+                  onCloseMobile();
+                }}
+                className="w-full mt-1 py-1 px-2 text-center text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors cursor-pointer"
+              >
+                View Completed Archive →
+              </button>
+            )}
+          </div>
 
           {/* Install App Banner Card */}
           {onOpenInstallModal && (

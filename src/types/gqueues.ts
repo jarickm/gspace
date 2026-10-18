@@ -1,9 +1,16 @@
 export type Priority = 'urgent' | 'high' | 'medium' | 'low' | 'none';
 
+export type KanbanStatus = 'todo' | 'in_progress' | 'waiting' | 'done';
+
+export type RecurringSchedule = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export type ViewMode = 'tasks' | 'kanban' | 'calendar' | 'completed';
+
 export interface Subtask {
   id: string;
   title: string;
   completed: boolean;
+  due?: string;
 }
 
 export interface DriveAttachment {
@@ -28,6 +35,11 @@ export interface GQueueTaskMetadata {
   driveAttachments?: DriveAttachment[];
   calendarEventId?: string;
   timeEstimate?: string;
+  kanbanStatus?: KanbanStatus;
+  recurring?: RecurringSchedule;
+  reminder?: string;
+  completedAt?: string;
+  createdAt?: string;
 }
 
 export interface GQueueTask {
@@ -43,7 +55,7 @@ export interface GQueueTask {
   parent?: string;
   position?: string;
   
-  // GQueues enhanced metadata
+  // GQueues advanced metadata
   priority: Priority;
   tags: string[];
   starred: boolean;
@@ -52,6 +64,11 @@ export interface GQueueTask {
   driveAttachments: DriveAttachment[];
   calendarEventId?: string;
   timeEstimate?: string;
+  kanbanStatus: KanbanStatus;
+  recurring: RecurringSchedule;
+  reminder?: string;
+  completedAt?: string;
+  createdAt?: string;
 }
 
 export interface QueueList {

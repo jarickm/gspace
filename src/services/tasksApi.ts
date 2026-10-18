@@ -1,4 +1,4 @@
-import type { GQueueTask, GQueueTaskMetadata, QueueList } from '../types/gqueues';
+import type { GQueueTask, GQueueTaskMetadata, QueueList, KanbanStatus, RecurringSchedule } from '../types/gqueues';
 
 const META_SEPARATOR = '\n\n--- [gqueues-meta] ---\n';
 
@@ -11,7 +11,12 @@ export function serializeNotes(cleanNotes: string, meta: GQueueTaskMetadata): st
     meta.assignedContact ||
     (meta.driveAttachments && meta.driveAttachments.length > 0) ||
     meta.calendarEventId ||
-    meta.timeEstimate;
+    meta.timeEstimate ||
+    (meta.kanbanStatus && meta.kanbanStatus !== 'todo') ||
+    (meta.recurring && meta.recurring !== 'none') ||
+    meta.reminder ||
+    meta.completedAt ||
+    meta.createdAt;
 
   const trimmedNotes = (cleanNotes || '').trim();
   if (!hasMeta) {
@@ -80,7 +85,6 @@ function getQueueColor(title: string, index: number): string {
 }
 
 export function parseQueueTitle(rawTitle: string): { category: string; title: string } {
-  // Supports "[Work] Project Alpha" or "Work / Project Alpha"
   const bracketMatch = rawTitle.match(/^\[(.*?)\]\s*(.*)$/);
   if (bracketMatch) {
     return { category: bracketMatch[1].trim(), title: bracketMatch[2].trim() };
@@ -219,6 +223,9 @@ export async function fetchTasks(accessToken: string, listId: string): Promise<G
     .filter((t) => !t.deleted)
     .map((item) => {
       const { cleanNotes, meta } = deserializeNotes(item.notes);
+      const isDone = item.status === 'completed';
+      const kanbanStatus: KanbanStatus = meta.kanbanStatus || (isDone ? 'done' : 'todo');
+
       return {
         id: item.id,
         listId,
@@ -239,6 +246,11 @@ export async function fetchTasks(accessToken: string, listId: string): Promise<G
         driveAttachments: meta.driveAttachments || [],
         calendarEventId: meta.calendarEventId,
         timeEstimate: meta.timeEstimate,
+        kanbanStatus,
+        recurring: meta.recurring || 'none',
+        reminder: meta.reminder,
+        completedAt: meta.completedAt || (isDone ? item.completed || item.updated : undefined),
+        createdAt: meta.createdAt || item.updated,
       };
     });
 }
@@ -248,6 +260,7 @@ export async function createTask(
   listId: string,
   data: Partial<GQueueTask>
 ): Promise<GQueueTask> {
+  const nowIso = new Date().toISOString();
   const meta: GQueueTaskMetadata = {
     priority: data.priority || 'none',
     tags: data.tags || [],
@@ -257,6 +270,11 @@ export async function createTask(
     driveAttachments: data.driveAttachments || [],
     calendarEventId: data.calendarEventId,
     timeEstimate: data.timeEstimate,
+    kanbanStatus: data.kanbanStatus || 'todo',
+    recurring: data.recurring || 'none',
+    reminder: data.reminder,
+    completedAt: data.completedAt,
+    createdAt: data.createdAt || nowIso,
   };
 
   const payload: Record<string, unknown> = {
@@ -266,7 +284,6 @@ export async function createTask(
   };
 
   if (data.due) {
-    // Format due date in RFC 3339 format required by Google Tasks API
     payload.due = data.due.includes('T') ? data.due : `${data.due}T00:00:00.000Z`;
   }
 
@@ -307,6 +324,11 @@ export async function createTask(
     driveAttachments: parsedMeta.driveAttachments || [],
     calendarEventId: parsedMeta.calendarEventId,
     timeEstimate: parsedMeta.timeEstimate,
+    kanbanStatus: parsedMeta.kanbanStatus || 'todo',
+    recurring: parsedMeta.recurring || 'none',
+    reminder: parsedMeta.reminder,
+    completedAt: parsedMeta.completedAt,
+    createdAt: parsedMeta.createdAt || nowIso,
   };
 }
 
@@ -325,6 +347,11 @@ export async function updateTask(
     driveAttachments: data.driveAttachments || [],
     calendarEventId: data.calendarEventId,
     timeEstimate: data.timeEstimate,
+    kanbanStatus: data.kanbanStatus || (data.status === 'completed' ? 'done' : 'todo'),
+    recurring: data.recurring || 'none',
+    reminder: data.reminder,
+    completedAt: data.completedAt,
+    createdAt: data.createdAt,
   };
 
   const payload: Record<string, unknown> = {
@@ -381,6 +408,11 @@ export async function updateTask(
     driveAttachments: parsedMeta.driveAttachments || [],
     calendarEventId: parsedMeta.calendarEventId,
     timeEstimate: parsedMeta.timeEstimate,
+    kanbanStatus: parsedMeta.kanbanStatus || (item.status === 'completed' ? 'done' : 'todo'),
+    recurring: parsedMeta.recurring || 'none',
+    reminder: parsedMeta.reminder,
+    completedAt: parsedMeta.completedAt || item.completed,
+    createdAt: parsedMeta.createdAt || item.updated,
   };
 }
 
@@ -406,4 +438,22 @@ export async function clearCompletedTasks(accessToken: string, listId: string): 
     const error = await res.text();
     throw new Error(`Failed to clear completed tasks (${res.status}): ${error}`);
   }
+}
+
+export async function moveTaskBetweenQueues(
+  accessToken: string,
+  sourceListId: string,
+  targetListId: string,
+  task: GQueueTask
+): Promise<GQueueTask> {
+  // Create in target list
+  const created = await createTask(accessToken, targetListId, {
+    ...task,
+    listId: targetListId,
+  });
+
+  // Delete from source list
+  await deleteTask(accessToken, sourceListId, task.id);
+
+  return created;
 }
