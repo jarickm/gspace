@@ -35,6 +35,10 @@ import {
   RotateCw,
   Loader2,
   Sparkles,
+  FileText,
+  FileSpreadsheet,
+  Presentation,
+  File,
 } from 'lucide-react';
 import { saveCustomTeammate, searchDirectoryPeople } from '../services/peopleApi';
 
@@ -82,6 +86,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [driveAttachments, setDriveAttachments] = useState<DriveAttachment[]>(
     task.driveAttachments || []
   );
+
+  // Synchronize attachments when updated externally (e.g. from DrivePickerModal)
+  React.useEffect(() => {
+    if (task.driveAttachments) {
+      setDriveAttachments(task.driveAttachments);
+    }
+  }, [task.driveAttachments]);
   const [kanbanStatus, setKanbanStatus] = useState<KanbanStatus>(task.kanbanStatus || 'todo');
   const [recurring, setRecurring] = useState<RecurringSchedule>(task.recurring || 'none');
   const [timeEstimate, setTimeEstimate] = useState<string>(task.timeEstimate || '');
@@ -942,22 +953,34 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   {driveAttachments.map((att) => (
                     <div
                       key={att.id}
-                      className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200 text-xs"
+                      className="flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-slate-100/70 border border-slate-200 text-xs transition-colors group"
                     >
                       <a
                         href={att.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 min-w-0 hover:text-blue-600 truncate"
+                        className="flex items-center gap-2.5 min-w-0 hover:text-blue-600 truncate flex-1"
+                        title="Open file in Google Drive"
                       >
-                        <Paperclip className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                        <span className="font-medium truncate">{att.name}</span>
-                        <ExternalLink className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                        {att.mimeType?.includes('document') || att.mimeType?.includes('word') ? (
+                          <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                        ) : att.mimeType?.includes('spreadsheet') || att.mimeType?.includes('sheet') || att.mimeType?.includes('excel') ? (
+                          <FileSpreadsheet className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                        ) : att.mimeType?.includes('presentation') || att.mimeType?.includes('powerpoint') ? (
+                          <Presentation className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                        ) : att.mimeType?.includes('pdf') ? (
+                          <File className="w-4 h-4 text-red-600 flex-shrink-0" />
+                        ) : (
+                          <Paperclip className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                        )}
+                        <span className="font-semibold text-slate-800 truncate group-hover:text-blue-600">{att.name}</span>
+                        <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 flex-shrink-0" />
                       </a>
                       <button
                         type="button"
                         onClick={() => handleRemoveAttachment(att.id)}
-                        className="p-1 text-slate-400 hover:text-red-600 rounded"
+                        className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
+                        title="Remove attachment"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>

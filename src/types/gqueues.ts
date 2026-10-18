@@ -101,6 +101,10 @@ export interface GoogleDriveFile {
   webViewLink: string;
   iconLink?: string;
   modifiedTime?: string;
+  size?: string;
+  owners?: { displayName?: string; emailAddress?: string; photoLink?: string }[];
+  thumbnailLink?: string;
+  shared?: boolean;
 }
 
 export interface GoogleCalendarEvent {

@@ -932,11 +932,28 @@ export default function App() {
   // Google Drive attachment selected
   const handleSelectDriveAttachment = (att: DriveAttachment) => {
     if (selectedTaskForDetail) {
+      if (selectedTaskForDetail.driveAttachments.some((a) => a.id === att.id || a.url === att.url)) {
+        return;
+      }
       const updatedList = [...selectedTaskForDetail.driveAttachments, att];
-      setSelectedTaskForDetail({
+      const updatedTask: GQueueTask = {
         ...selectedTaskForDetail,
         driveAttachments: updatedList,
-      });
+      };
+      setSelectedTaskForDetail(updatedTask);
+      setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
+      setAllTasksCache((prev) => ({
+        ...prev,
+        [updatedTask.listId]: (prev[updatedTask.listId] || []).map((t) =>
+          t.id === updatedTask.id ? updatedTask : t
+        ),
+      }));
+
+      if (token) {
+        updateTask(token, updatedTask.listId, updatedTask.id, {
+          driveAttachments: updatedList,
+        }).catch((err) => console.error('Failed to save Drive attachment to task:', err));
+      }
     }
   };
 
@@ -1164,6 +1181,7 @@ export default function App() {
           accessToken={token}
           onClose={() => setIsDrivePickerOpen(false)}
           onSelectFile={handleSelectDriveAttachment}
+          onReauth={handleSignIn}
         />
       )}
 
