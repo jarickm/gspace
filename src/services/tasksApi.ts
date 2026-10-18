@@ -1,4 +1,11 @@
-import type { GQueueTask, GQueueTaskMetadata, QueueList, KanbanStatus, RecurringSchedule } from '../types/gqueues';
+import type {
+  GQueueTask,
+  GQueueTaskMetadata,
+  QueueList,
+  KanbanStatus,
+  RecurringSchedule,
+  TimeLogEntry,
+} from '../types/gqueues';
 
 const META_SEPARATOR = '\n\n--- [gqueues-meta] ---\n';
 
@@ -14,9 +21,12 @@ export function serializeNotes(cleanNotes: string, meta: GQueueTaskMetadata): st
     meta.timeEstimate ||
     (meta.kanbanStatus && meta.kanbanStatus !== 'todo') ||
     (meta.recurring && meta.recurring !== 'none') ||
+    meta.recurrenceRule ||
     meta.reminder ||
     meta.completedAt ||
-    meta.createdAt;
+    meta.createdAt ||
+    (meta.timeLogs && meta.timeLogs.length > 0) ||
+    (meta.totalTimeSpentSeconds && meta.totalTimeSpentSeconds > 0);
 
   const trimmedNotes = (cleanNotes || '').trim();
   if (!hasMeta) {
@@ -48,6 +58,101 @@ export function deserializeNotes(rawNotes?: string): { cleanNotes: string; meta:
   }
 }
 
+export function buildRRuleString(schedule: RecurringSchedule): string | undefined {
+  switch (schedule) {
+    case 'daily':
+      return 'RRULE:FREQ=DAILY;INTERVAL=1';
+    case 'weekdays':
+      return 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR';
+    case 'weekly':
+      return 'RRULE:FREQ=WEEKLY;INTERVAL=1';
+    case 'biweekly':
+      return 'RRULE:FREQ=WEEKLY;INTERVAL=2';
+    case 'monthly':
+      return 'RRULE:FREQ=MONTHLY;INTERVAL=1';
+    case 'yearly':
+      return 'RRULE:FREQ=YEARLY;INTERVAL=1';
+    default:
+      return undefined;
+  }
+}
+
+export function parseRRuleToSchedule(rrule?: string): RecurringSchedule {
+  if (!rrule) return 'none';
+  const upper = rrule.toUpperCase();
+  if (upper.includes('FREQ=DAILY')) return 'daily';
+  if (upper.includes('BYDAY=MO,TU,WE,TH,FR')) return 'weekdays';
+  if (upper.includes('FREQ=WEEKLY')) {
+    if (upper.includes('INTERVAL=2')) return 'biweekly';
+    return 'weekly';
+  }
+  if (upper.includes('FREQ=MONTHLY')) return 'monthly';
+  if (upper.includes('FREQ=YEARLY')) return 'yearly';
+  return 'none';
+}
+
+/**
+ * Calculates the next due date based on the repetition rule
+ */
+export function computeNextRecurringDueDate(
+  currentDue?: string,
+  recurring: RecurringSchedule = 'none',
+  rrule?: string
+): string {
+  const baseDate = currentDue ? new Date(currentDue) : new Date();
+  if (isNaN(baseDate.getTime())) {
+    baseDate.setTime(Date.now());
+  }
+
+  const next = new Date(baseDate);
+
+  const effectiveSchedule = recurring !== 'none' ? recurring : parseRRuleToSchedule(rrule);
+
+  switch (effectiveSchedule) {
+    case 'daily':
+      next.setDate(next.getDate() + 1);
+      break;
+    case 'weekdays': {
+      next.setDate(next.getDate() + 1);
+      const day = next.getDay();
+      if (day === 6) next.setDate(next.getDate() + 2); // Saturday -> Monday
+      else if (day === 0) next.setDate(next.getDate() + 1); // Sunday -> Monday
+      break;
+    }
+    case 'weekly':
+      next.setDate(next.getDate() + 7);
+      break;
+    case 'biweekly':
+      next.setDate(next.getDate() + 14);
+      break;
+    case 'monthly':
+      next.setMonth(next.getMonth() + 1);
+      break;
+    case 'yearly':
+      next.setFullYear(next.getFullYear() + 1);
+      break;
+    default:
+      next.setDate(next.getDate() + 1);
+  }
+
+  return next.toISOString().split('T')[0];
+}
+
+export function formatSecondsToHuman(seconds: number): string {
+  if (!seconds || seconds <= 0) return '0m';
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hrs > 0) {
+    return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+  }
+  if (mins > 0) {
+    return secs > 0 && mins < 5 ? `${mins}m ${secs}s` : `${mins}m`;
+  }
+  return `${secs}s`;
+}
+
 interface RawGoogleTaskList {
   id: string;
   title: string;
@@ -66,6 +171,7 @@ interface RawGoogleTask {
   position?: string;
   deleted?: boolean;
   hidden?: boolean;
+  recurrence?: string[];
 }
 
 // Color palette for queues like GQueues
@@ -226,6 +332,21 @@ export async function fetchTasks(accessToken: string, listId: string): Promise<G
       const isDone = item.status === 'completed';
       const kanbanStatus: KanbanStatus = meta.kanbanStatus || (isDone ? 'done' : 'todo');
 
+      const recurringSchedule =
+        meta.recurring ||
+        (item.recurrence && item.recurrence.length > 0
+          ? parseRRuleToSchedule(item.recurrence[0])
+          : 'none');
+
+      const recurrenceRule =
+        meta.recurrenceRule ||
+        (item.recurrence && item.recurrence.length > 0 ? item.recurrence[0] : undefined);
+
+      const timeLogs: TimeLogEntry[] = meta.timeLogs || [];
+      const totalTimeSpentSeconds =
+        meta.totalTimeSpentSeconds ||
+        timeLogs.reduce((acc, log) => acc + (log.seconds || 0), 0);
+
       return {
         id: item.id,
         listId,
@@ -247,10 +368,13 @@ export async function fetchTasks(accessToken: string, listId: string): Promise<G
         calendarEventId: meta.calendarEventId,
         timeEstimate: meta.timeEstimate,
         kanbanStatus,
-        recurring: meta.recurring || 'none',
+        recurring: recurringSchedule,
+        recurrenceRule: recurrenceRule || buildRRuleString(recurringSchedule),
         reminder: meta.reminder,
         completedAt: meta.completedAt || (isDone ? item.completed || item.updated : undefined),
         createdAt: meta.createdAt || item.updated,
+        timeLogs,
+        totalTimeSpentSeconds,
       };
     });
 }
@@ -261,6 +385,8 @@ export async function createTask(
   data: Partial<GQueueTask>
 ): Promise<GQueueTask> {
   const nowIso = new Date().toISOString();
+  const recurrenceRule = data.recurrenceRule || (data.recurring ? buildRRuleString(data.recurring) : undefined);
+
   const meta: GQueueTaskMetadata = {
     priority: data.priority || 'none',
     tags: data.tags || [],
@@ -272,9 +398,12 @@ export async function createTask(
     timeEstimate: data.timeEstimate,
     kanbanStatus: data.kanbanStatus || 'todo',
     recurring: data.recurring || 'none',
+    recurrenceRule,
     reminder: data.reminder,
     completedAt: data.completedAt,
     createdAt: data.createdAt || nowIso,
+    timeLogs: data.timeLogs || [],
+    totalTimeSpentSeconds: data.totalTimeSpentSeconds || 0,
   };
 
   const payload: Record<string, unknown> = {
@@ -287,7 +416,12 @@ export async function createTask(
     payload.due = data.due.includes('T') ? data.due : `${data.due}T00:00:00.000Z`;
   }
 
-  const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks`, {
+  // Google Tasks API recurrence field
+  if (recurrenceRule) {
+    payload.recurrence = [recurrenceRule];
+  }
+
+  let res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -295,6 +429,19 @@ export async function createTask(
     },
     body: JSON.stringify(payload),
   });
+
+  // If Google Tasks rejects the recurrence property, retry without it (metadata remains safely preserved in notes)
+  if (!res.ok && payload.recurrence) {
+    delete payload.recurrence;
+    res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+  }
 
   if (!res.ok) {
     const error = await res.text();
@@ -326,9 +473,12 @@ export async function createTask(
     timeEstimate: parsedMeta.timeEstimate,
     kanbanStatus: parsedMeta.kanbanStatus || 'todo',
     recurring: parsedMeta.recurring || 'none',
+    recurrenceRule: parsedMeta.recurrenceRule || recurrenceRule,
     reminder: parsedMeta.reminder,
     completedAt: parsedMeta.completedAt,
     createdAt: parsedMeta.createdAt || nowIso,
+    timeLogs: parsedMeta.timeLogs || [],
+    totalTimeSpentSeconds: parsedMeta.totalTimeSpentSeconds || 0,
   };
 }
 
@@ -338,6 +488,13 @@ export async function updateTask(
   taskId: string,
   data: Partial<GQueueTask>
 ): Promise<GQueueTask> {
+  const recurrenceRule =
+    data.recurrenceRule !== undefined
+      ? data.recurrenceRule
+      : data.recurring
+      ? buildRRuleString(data.recurring)
+      : undefined;
+
   const meta: GQueueTaskMetadata = {
     priority: data.priority || 'none',
     tags: data.tags || [],
@@ -349,9 +506,12 @@ export async function updateTask(
     timeEstimate: data.timeEstimate,
     kanbanStatus: data.kanbanStatus || (data.status === 'completed' ? 'done' : 'todo'),
     recurring: data.recurring || 'none',
+    recurrenceRule,
     reminder: data.reminder,
     completedAt: data.completedAt,
     createdAt: data.createdAt,
+    timeLogs: data.timeLogs || [],
+    totalTimeSpentSeconds: data.totalTimeSpentSeconds || 0,
   };
 
   const payload: Record<string, unknown> = {
@@ -371,7 +531,11 @@ export async function updateTask(
     payload.completed = data.completed;
   }
 
-  const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`, {
+  if (recurrenceRule) {
+    payload.recurrence = [recurrenceRule];
+  }
+
+  let res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -379,6 +543,18 @@ export async function updateTask(
     },
     body: JSON.stringify(payload),
   });
+
+  if (!res.ok && payload.recurrence) {
+    delete payload.recurrence;
+    res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+  }
 
   if (!res.ok) {
     const error = await res.text();
@@ -410,13 +586,20 @@ export async function updateTask(
     timeEstimate: parsedMeta.timeEstimate,
     kanbanStatus: parsedMeta.kanbanStatus || (item.status === 'completed' ? 'done' : 'todo'),
     recurring: parsedMeta.recurring || 'none',
+    recurrenceRule: parsedMeta.recurrenceRule || recurrenceRule,
     reminder: parsedMeta.reminder,
-    completedAt: parsedMeta.completedAt || item.completed,
-    createdAt: parsedMeta.createdAt || item.updated,
+    completedAt: parsedMeta.completedAt,
+    createdAt: parsedMeta.createdAt,
+    timeLogs: parsedMeta.timeLogs || [],
+    totalTimeSpentSeconds: parsedMeta.totalTimeSpentSeconds || 0,
   };
 }
 
-export async function deleteTask(accessToken: string, listId: string, taskId: string): Promise<void> {
+export async function deleteTask(
+  accessToken: string,
+  listId: string,
+  taskId: string
+): Promise<void> {
   const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -428,7 +611,10 @@ export async function deleteTask(accessToken: string, listId: string, taskId: st
   }
 }
 
-export async function clearCompletedTasks(accessToken: string, listId: string): Promise<void> {
+export async function clearCompletedTasks(
+  accessToken: string,
+  listId: string
+): Promise<void> {
   const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/clear`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -438,22 +624,4 @@ export async function clearCompletedTasks(accessToken: string, listId: string): 
     const error = await res.text();
     throw new Error(`Failed to clear completed tasks (${res.status}): ${error}`);
   }
-}
-
-export async function moveTaskBetweenQueues(
-  accessToken: string,
-  sourceListId: string,
-  targetListId: string,
-  task: GQueueTask
-): Promise<GQueueTask> {
-  // Create in target list
-  const created = await createTask(accessToken, targetListId, {
-    ...task,
-    listId: targetListId,
-  });
-
-  // Delete from source list
-  await deleteTask(accessToken, sourceListId, task.id);
-
-  return created;
 }

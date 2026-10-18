@@ -2,9 +2,16 @@ export type Priority = 'urgent' | 'high' | 'medium' | 'low' | 'none';
 
 export type KanbanStatus = 'todo' | 'in_progress' | 'waiting' | 'done';
 
-export type RecurringSchedule = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+export type RecurringSchedule =
+  | 'none'
+  | 'daily'
+  | 'weekdays'
+  | 'weekly'
+  | 'biweekly'
+  | 'monthly'
+  | 'yearly';
 
-export type ViewMode = 'tasks' | 'kanban' | 'calendar' | 'completed';
+export type ViewMode = 'tasks' | 'kanban' | 'calendar' | 'completed' | 'dashboard';
 
 export interface Subtask {
   id: string;
@@ -26,6 +33,13 @@ export interface AssignedContact {
   avatarUrl?: string;
 }
 
+export interface TimeLogEntry {
+  id: string;
+  seconds: number;
+  timestamp: string; // ISO date string
+  note?: string;
+}
+
 export interface GQueueTaskMetadata {
   priority?: Priority;
   tags?: string[];
@@ -37,9 +51,12 @@ export interface GQueueTaskMetadata {
   timeEstimate?: string;
   kanbanStatus?: KanbanStatus;
   recurring?: RecurringSchedule;
+  recurrenceRule?: string; // RFC 5545 format e.g. RRULE:FREQ=DAILY
   reminder?: string;
   completedAt?: string;
   createdAt?: string;
+  timeLogs?: TimeLogEntry[];
+  totalTimeSpentSeconds?: number;
 }
 
 export interface GQueueTask {
@@ -66,9 +83,12 @@ export interface GQueueTask {
   timeEstimate?: string;
   kanbanStatus: KanbanStatus;
   recurring: RecurringSchedule;
+  recurrenceRule?: string;
   reminder?: string;
   completedAt?: string;
   createdAt?: string;
+  timeLogs: TimeLogEntry[];
+  totalTimeSpentSeconds: number;
 }
 
 export interface QueueList {
@@ -114,4 +134,31 @@ export interface GoogleCalendarEvent {
   start: { dateTime?: string; date?: string };
   end: { dateTime?: string; date?: string };
   htmlLink?: string;
+}
+
+export interface CalendarMeeting {
+  id: string;
+  summary: string;
+  description?: string;
+  start: { dateTime?: string; date?: string };
+  end: { dateTime?: string; date?: string };
+  htmlLink?: string;
+  hangoutLink?: string; // Google Meet video call URL
+  conferenceData?: any;
+  attendees?: Array<{ email: string; displayName?: string; responseStatus?: string; self?: boolean }>;
+  location?: string;
+  status?: string;
+  isLiveNow?: boolean;
+  startsInMinutes?: number;
+}
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'meeting' | 'timer';
+  timestamp: string;
+  read?: boolean;
+  taskId?: string;
+  meetingLink?: string;
 }

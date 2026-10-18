@@ -1,4 +1,4 @@
-import type { GoogleCalendarEvent } from '../types/gqueues';
+import type { GoogleCalendarEvent, CalendarMeeting } from '../types/gqueues';
 
 export interface CalendarEventAttendee {
   email: string;
@@ -31,7 +31,7 @@ export async function fetchCalendarEvents(
   const params = new URLSearchParams({
     singleEvents: 'true',
     orderBy: 'startTime',
-    maxResults: '50',
+    maxResults: '100',
   });
 
   if (timeMin) params.set('timeMin', timeMin);
@@ -60,6 +60,83 @@ export async function fetchCalendarEvents(
     end: e.end || {},
     htmlLink: e.htmlLink,
   }));
+}
+
+/**
+ * Check if the user has meetings today in Google Workspace Calendar
+ * Returns enriched meetings with Google Meet video links, status, and live countdowns
+ */
+export async function fetchTodayMeetings(accessToken: string): Promise<CalendarMeeting[]> {
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+  const params = new URLSearchParams({
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    timeMin: startOfDay.toISOString(),
+    timeMax: endOfDay.toISOString(),
+    maxResults: '50',
+  });
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(`Failed to check today meetings (${res.status}): ${errorBody}`);
+  }
+
+  const data = await res.json();
+  const items = data.items || [];
+  const currentTimeMs = now.getTime();
+
+  return items
+    .filter((e: any) => e.status !== 'cancelled')
+    .map((e: any) => {
+      let isLiveNow = false;
+      let startsInMinutes: number | undefined = undefined;
+
+      const startTimeStr = e.start?.dateTime || (e.start?.date ? `${e.start.date}T00:00:00` : null);
+      const endTimeStr = e.end?.dateTime || (e.end?.date ? `${e.end.date}T23:59:59` : null);
+
+      if (startTimeStr && endTimeStr) {
+        const startMs = new Date(startTimeStr).getTime();
+        const endMs = new Date(endTimeStr).getTime();
+
+        if (currentTimeMs >= startMs && currentTimeMs <= endMs) {
+          isLiveNow = true;
+          startsInMinutes = 0;
+        } else if (startMs > currentTimeMs) {
+          startsInMinutes = Math.round((startMs - currentTimeMs) / (60 * 1000));
+        }
+      }
+
+      // Check for Google Meet link
+      const hangoutLink =
+        e.hangoutLink ||
+        e.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri;
+
+      return {
+        id: e.id,
+        summary: e.summary || '(Untitled Meeting)',
+        description: e.description,
+        start: e.start || {},
+        end: e.end || {},
+        htmlLink: e.htmlLink,
+        hangoutLink,
+        conferenceData: e.conferenceData,
+        attendees: e.attendees || [],
+        location: e.location,
+        status: e.status,
+        isLiveNow,
+        startsInMinutes,
+      };
+    });
 }
 
 export async function createCalendarEvent(
