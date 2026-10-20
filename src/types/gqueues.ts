@@ -57,6 +57,7 @@ export interface GQueueTaskMetadata {
   createdAt?: string;
   timeLogs?: TimeLogEntry[];
   totalTimeSpentSeconds?: number;
+  dependsOn?: string[]; // IDs of tasks this task depends on (blocked by)
 }
 
 export interface GQueueTask {
@@ -89,6 +90,7 @@ export interface GQueueTask {
   createdAt?: string;
   timeLogs: TimeLogEntry[];
   totalTimeSpentSeconds: number;
+  dependsOn?: string[];
 }
 
 export interface QueueList {
@@ -134,6 +136,10 @@ export interface GoogleCalendarEvent {
   start: { dateTime?: string; date?: string };
   end: { dateTime?: string; date?: string };
   htmlLink?: string;
+  hangoutLink?: string;
+  location?: string;
+  attendees?: Array<{ email: string; displayName?: string; responseStatus?: string; self?: boolean }>;
+  status?: string;
 }
 
 export interface CalendarMeeting {

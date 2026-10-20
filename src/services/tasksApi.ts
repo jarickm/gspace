@@ -24,9 +24,9 @@ export function serializeNotes(cleanNotes: string, meta: GQueueTaskMetadata): st
     meta.recurrenceRule ||
     meta.reminder ||
     meta.completedAt ||
-    meta.createdAt ||
     (meta.timeLogs && meta.timeLogs.length > 0) ||
-    (meta.totalTimeSpentSeconds && meta.totalTimeSpentSeconds > 0);
+    (meta.totalTimeSpentSeconds && meta.totalTimeSpentSeconds > 0) ||
+    (meta.dependsOn && meta.dependsOn.length > 0);
 
   const trimmedNotes = (cleanNotes || '').trim();
   if (!hasMeta) {
@@ -375,6 +375,7 @@ export async function fetchTasks(accessToken: string, listId: string): Promise<G
         createdAt: meta.createdAt || item.updated,
         timeLogs,
         totalTimeSpentSeconds,
+        dependsOn: meta.dependsOn || [],
       };
     });
 }
@@ -404,6 +405,7 @@ export async function createTask(
     createdAt: data.createdAt || nowIso,
     timeLogs: data.timeLogs || [],
     totalTimeSpentSeconds: data.totalTimeSpentSeconds || 0,
+    dependsOn: data.dependsOn || [],
   };
 
   const payload: Record<string, unknown> = {
@@ -479,6 +481,7 @@ export async function createTask(
     createdAt: parsedMeta.createdAt || nowIso,
     timeLogs: parsedMeta.timeLogs || [],
     totalTimeSpentSeconds: parsedMeta.totalTimeSpentSeconds || 0,
+    dependsOn: parsedMeta.dependsOn || [],
   };
 }
 
@@ -512,6 +515,7 @@ export async function updateTask(
     createdAt: data.createdAt,
     timeLogs: data.timeLogs || [],
     totalTimeSpentSeconds: data.totalTimeSpentSeconds || 0,
+    dependsOn: data.dependsOn || [],
   };
 
   const payload: Record<string, unknown> = {
@@ -592,6 +596,7 @@ export async function updateTask(
     createdAt: parsedMeta.createdAt,
     timeLogs: parsedMeta.timeLogs || [],
     totalTimeSpentSeconds: parsedMeta.totalTimeSpentSeconds || 0,
+    dependsOn: parsedMeta.dependsOn || [],
   };
 }
 

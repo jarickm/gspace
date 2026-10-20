@@ -17,6 +17,8 @@ import {
   FileDown,
   Keyboard,
   ShieldCheck,
+  BarChart3,
+  Video,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -34,8 +36,10 @@ interface HeaderProps {
   onToggleMobileSidebar: () => void;
   isMobileSidebarOpen: boolean;
   completedCount?: number;
+  todayMeetingsCount?: number;
   onOpenExportModal?: () => void;
   onOpenShortcutsModal?: () => void;
+  onOpenMeetingChecker?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -53,8 +57,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar,
   isMobileSidebarOpen,
   completedCount = 0,
+  todayMeetingsCount = 0,
   onOpenExportModal,
   onOpenShortcutsModal,
+  onOpenMeetingChecker,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
@@ -170,7 +176,38 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
+
+          {/* Recharts Analytics Dashboard View Tab */}
+          <button
+            onClick={() => onViewChange('dashboard')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
+              currentView === 'dashboard'
+                ? 'bg-white text-purple-700 shadow-xs font-semibold'
+                : 'hover:text-slate-900'
+            }`}
+            title="Visual Task Charts & Productivity Analytics"
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-purple-600" />
+            <span>Dashboard</span>
+          </button>
         </div>
+
+        {/* Check Google Workspace Meetings Button */}
+        {onOpenMeetingChecker && (
+          <button
+            onClick={onOpenMeetingChecker}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold shadow-2xs transition-all active:scale-95"
+            title="Check today's Google Calendar meetings & join Google Meet calls"
+          >
+            <Video className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden md:inline">Check Meetings</span>
+            {todayMeetingsCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-600 text-white font-bold">
+                {todayMeetingsCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Export action */}
         {onOpenExportModal && (

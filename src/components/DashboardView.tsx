@@ -30,6 +30,8 @@ import {
   Sparkles,
   ArrowUpRight,
   Filter,
+  Link2,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -64,7 +66,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const endOfMonth = startOfToday + 30 * 24 * 60 * 60 * 1000;
 
     return list.filter((t) => {
-      if (!t.due) return timeFilter === 'all';
+      if (!t.due) return false;
       const dueTime = new Date(t.due).getTime();
 
       if (timeFilter === 'today') {
@@ -202,6 +204,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .slice(0, 5);
   }, [allTasks]);
 
+  // Blocked and bottleneck tasks
+  const blockedTasks = useMemo(() => {
+    return allTasks.filter((t) => {
+      if (t.status === 'completed' || !t.dependsOn || t.dependsOn.length === 0) return false;
+      const prereqs = allTasks.filter((p) => t.dependsOn?.includes(p.id));
+      return prereqs.some((p) => p.status !== 'completed');
+    });
+  }, [allTasks]);
+
+  const bottleneckTasks = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of allTasks) {
+      if (t.status !== 'completed' && t.dependsOn) {
+        for (const depId of t.dependsOn) {
+          counts[depId] = (counts[depId] || 0) + 1;
+        }
+      }
+    }
+    return Object.entries(counts)
+      .map(([id, count]) => {
+        const t = allTasks.find((x) => x.id === id);
+        return { task: t, count };
+      })
+      .filter((x): x is { task: GQueueTask; count: number } => !!x.task && x.task.status !== 'completed')
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }, [allTasks]);
+
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50/60 p-4 sm:p-6 lg:p-8 space-y-6">
       {/* Dashboard Top Header & Filters */}
@@ -270,7 +300,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         {/* Card 1: Total Tasks */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500 mb-2">
@@ -279,18 +309,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{totalTasks}</span>
-            <span className="text-xs text-slate-500">across queues</span>
+            <span className="text-xs text-slate-500">total</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-            <span>{activeTasks.length} pending execution</span>
+            <span>{activeTasks.length} pending</span>
           </div>
         </div>
 
         {/* Card 2: Completion Rate */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Completion Rate</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Completion</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="flex items-baseline gap-2">
@@ -315,13 +345,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className={`text-2xl sm:text-3xl font-extrabold ${overdueTasks.length > 0 ? 'text-red-600' : 'text-slate-800'}`}>
               {overdueTasks.length}
             </span>
-            <span className="text-xs text-slate-500">need action</span>
+            <span className="text-xs text-slate-500">overdue</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
             {overdueTasks.length > 0 ? (
-              <span className="text-red-600 font-medium">⚠️ Action required immediately</span>
+              <span className="text-red-600 font-medium">⚠️ Action required</span>
             ) : (
-              <span className="text-emerald-600 font-medium">✨ All deadlines on track</span>
+              <span className="text-emerald-600 font-medium">✨ All on track</span>
             )}
           </div>
         </div>
@@ -334,27 +364,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl sm:text-3xl font-extrabold text-amber-600">{dueTodayTasks.length}</span>
-            <span className="text-xs text-slate-500">scheduled</span>
+            <span className="text-xs text-slate-500">tasks</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
-            <span>Focused on today’s agenda</span>
+            <span>Today’s agenda</span>
           </div>
         </div>
 
-        {/* Card 5: Total Time Logged */}
-        <div className="col-span-2 lg:col-span-1 bg-white p-4 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
+        {/* Card 5: Blocked Dependencies */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Time Tracked</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Blocked</span>
+            <ShieldAlert className={`w-4 h-4 ${blockedTasks.length > 0 ? 'text-rose-600' : 'text-slate-400'}`} />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl sm:text-3xl font-extrabold ${blockedTasks.length > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+              {blockedTasks.length}
+            </span>
+            <span className="text-xs text-slate-500">tasks</span>
+          </div>
+          <div className="mt-2 text-[11px] text-slate-500">
+            <span>Waiting on prerequisites</span>
+          </div>
+        </div>
+
+        {/* Card 6: Total Time Logged */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wider">Time Logged</span>
             <Timer className="w-4 h-4 text-purple-600" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-purple-700">
+            <span className="text-xl sm:text-2xl font-extrabold text-purple-700 truncate">
               {formatSecondsToHuman(totalTimeSpentSeconds)}
             </span>
           </div>
           <div className="mt-2 text-[11px] text-purple-600 font-medium flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            <span>Productivity stopwatch</span>
+            <span>Stopwatch tracked</span>
           </div>
         </div>
       </div>
@@ -589,6 +636,91 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </div>
                       <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[11px] flex-shrink-0">
                         {formatSecondsToHuman(t.totalTimeSpentSeconds || 0)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Card 5: Task Dependencies & Bottleneck Analysis */}
+        <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Link2 className="w-4 h-4 text-indigo-600" />
+              <h2 className="text-sm font-bold text-slate-900">Task Dependency Flow & Bottlenecks</h2>
+            </div>
+            <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-semibold">
+              {blockedTasks.length} Blocked Task{blockedTasks.length === 1 ? '' : 's'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left: Key Bottleneck Tasks */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
+              <p className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
+                <span>Critical Path Bottlenecks</span>
+                <span className="text-[10px] text-slate-400">Tasks blocking others</span>
+              </p>
+              {bottleneckTasks.length === 0 ? (
+                <p className="text-xs text-slate-400 italic py-2">
+                  No dependency bottlenecks detected. Great workflow flow!
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {bottleneckTasks.map(({ task: bTask, count }) => (
+                    <div
+                      key={bTask.id}
+                      onClick={() => onSelectTask(bTask)}
+                      className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 hover:border-indigo-300 transition-colors cursor-pointer text-xs group"
+                    >
+                      <div className="truncate flex-1 min-w-0 pr-2">
+                        <span className="font-semibold text-slate-900 truncate block group-hover:text-indigo-600">
+                          {bTask.title}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {bTask.due ? `Due ${bTask.due.split('T')[0]}` : 'No due date'}
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 bg-rose-100 text-rose-700 border border-rose-200 rounded font-bold text-[10px] flex-shrink-0">
+                        Blocks {count} task{count > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Blocked Tasks List */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
+              <p className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
+                <span>Waiting / Blocked Tasks</span>
+                <span className="text-[10px] text-slate-400">Pending prerequisites</span>
+              </p>
+              {blockedTasks.length === 0 ? (
+                <p className="text-xs text-slate-400 italic py-2">
+                  All active tasks are ready to work on!
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {blockedTasks.map((bTask) => (
+                    <div
+                      key={bTask.id}
+                      onClick={() => onSelectTask(bTask)}
+                      className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 hover:border-rose-300 transition-colors cursor-pointer text-xs group"
+                    >
+                      <div className="truncate flex-1 min-w-0 pr-2">
+                        <span className="font-semibold text-slate-900 truncate block group-hover:text-rose-600">
+                          {bTask.title}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          Depends on {bTask.dependsOn?.length} task(s)
+                        </span>
+                      </div>
+                      <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-bold text-[10px] flex-shrink-0">
+                        Blocked
                       </span>
                     </div>
                   ))}

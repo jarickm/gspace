@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type {
   GQueueTask,
   Priority,
@@ -7,6 +7,7 @@ import type {
   DriveAttachment,
   KanbanStatus,
   RecurringSchedule,
+  TimeLogEntry,
 } from '../types/gqueues';
 import {
   Calendar,
@@ -39,11 +40,19 @@ import {
   FileSpreadsheet,
   Presentation,
   File,
+  Play,
+  Pause,
+  Flame,
+  Link2,
+  Clock,
+  ShieldAlert,
 } from 'lucide-react';
 import { saveCustomTeammate, searchDirectoryPeople } from '../services/peopleApi';
+import { formatSecondsToHuman } from '../services/tasksApi';
 
 interface TaskDetailModalProps {
   task: GQueueTask | null;
+  allTasks?: GQueueTask[];
   isOpen: boolean;
   contacts: GoogleContact[];
   accessToken?: string | null;
@@ -55,10 +64,13 @@ interface TaskDetailModalProps {
   onSyncCalendar: (task: GQueueTask) => Promise<void>;
   onUnsyncCalendar: (task: GQueueTask) => Promise<void>;
   onRefreshContacts?: () => Promise<void>;
+  onEnterFocusMode?: (task: GQueueTask) => void;
+  onLogTimeSpent?: (taskId: string, seconds: number, note?: string) => Promise<void>;
 }
 
 export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   task,
+  allTasks = [],
   isOpen,
   contacts,
   accessToken,
@@ -70,6 +82,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onSyncCalendar,
   onUnsyncCalendar,
   onRefreshContacts,
+  onEnterFocusMode,
+  onLogTimeSpent,
 }) => {
   if (!isOpen || !task) return null;
 
@@ -96,6 +110,31 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [kanbanStatus, setKanbanStatus] = useState<KanbanStatus>(task.kanbanStatus || 'todo');
   const [recurring, setRecurring] = useState<RecurringSchedule>(task.recurring || 'none');
   const [timeEstimate, setTimeEstimate] = useState<string>(task.timeEstimate || '');
+
+  // Task Dependencies state
+  const [dependsOn, setDependsOn] = useState<string[]>(task.dependsOn || []);
+  const [selectedDepTaskId, setSelectedDepTaskId] = useState('');
+
+  // Start / Stop Timer & Time Tracking states
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [timeLogs, setTimeLogs] = useState<TimeLogEntry[]>(task.timeLogs || []);
+  const [totalTimeSpentSeconds, setTotalTimeSpentSeconds] = useState<number>(
+    task.totalTimeSpentSeconds || 0
+  );
+  const [timerSessionNote, setTimerSessionNote] = useState('');
+  const [customMinutesInput, setCustomMinutesInput] = useState('');
+
+  // Live timer interval
+  useEffect(() => {
+    let interval: any = null;
+    if (isTimerRunning) {
+      interval = setInterval(() => {
+        setTimerSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isTimerRunning]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isCalendarSyncing, setIsCalendarSyncing] = useState(false);
@@ -252,10 +291,89 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     if (onRefreshContacts) onRefreshContacts();
   };
 
+  // Dependencies calculations
+  const prerequisiteTasks = useMemo(() => {
+    return allTasks.filter((t) => dependsOn.includes(t.id));
+  }, [allTasks, dependsOn]);
+
+  const uncompletedPrereqs = useMemo(() => {
+    return prerequisiteTasks.filter((t) => t.status !== 'completed');
+  }, [prerequisiteTasks]);
+
+  const isBlocked = uncompletedPrereqs.length > 0;
+
+  // Available tasks to add as dependency
+  const availableDependencyTasks = useMemo(() => {
+    return allTasks.filter((t) => t.id !== task.id && !dependsOn.includes(t.id));
+  }, [allTasks, task.id, dependsOn]);
+
+  const handleAddDependency = (depTaskId: string) => {
+    if (!depTaskId || dependsOn.includes(depTaskId)) return;
+    setDependsOn((prev) => [...prev, depTaskId]);
+    setSelectedDepTaskId('');
+  };
+
+  const handleRemoveDependency = (depTaskId: string) => {
+    setDependsOn((prev) => prev.filter((id) => id !== depTaskId));
+  };
+
+  // Timer handlers
+  const handleToggleTimer = () => {
+    if (isTimerRunning) {
+      if (timerSeconds > 0) {
+        const newLog: TimeLogEntry = {
+          id: 'log-' + Date.now(),
+          seconds: timerSeconds,
+          timestamp: new Date().toISOString(),
+          note: timerSessionNote.trim() || 'Work session',
+        };
+        const nextLogs = [newLog, ...timeLogs];
+        const nextTotal = totalTimeSpentSeconds + timerSeconds;
+        setTimeLogs(nextLogs);
+        setTotalTimeSpentSeconds(nextTotal);
+        if (onLogTimeSpent) {
+          onLogTimeSpent(task.id, timerSeconds, timerSessionNote.trim());
+        }
+      }
+      setIsTimerRunning(false);
+      setTimerSeconds(0);
+      setTimerSessionNote('');
+    } else {
+      setIsTimerRunning(true);
+    }
+  };
+
+  const handleQuickLogMinutes = (minutesToAdd: number, noteDesc?: string) => {
+    const secs = minutesToAdd * 60;
+    const newLog: TimeLogEntry = {
+      id: 'log-' + Date.now(),
+      seconds: secs,
+      timestamp: new Date().toISOString(),
+      note: noteDesc || `Quick log +${minutesToAdd}m`,
+    };
+    const nextLogs = [newLog, ...timeLogs];
+    const nextTotal = totalTimeSpentSeconds + secs;
+    setTimeLogs(nextLogs);
+    setTotalTimeSpentSeconds(nextTotal);
+    if (onLogTimeSpent) {
+      onLogTimeSpent(task.id, secs, newLog.note);
+    }
+  };
+
+  const handleDeleteTimeLog = (logId: string) => {
+    const logToDelete = timeLogs.find((l) => l.id === logId);
+    if (!logToDelete) return;
+    const nextLogs = timeLogs.filter((l) => l.id !== logId);
+    const nextTotal = Math.max(0, totalTimeSpentSeconds - (logToDelete.seconds || 0));
+    setTimeLogs(nextLogs);
+    setTotalTimeSpentSeconds(nextTotal);
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
       const isDone = kanbanStatus === 'done' || task.status === 'completed';
+      const finalTotalSeconds = totalTimeSpentSeconds + (isTimerRunning ? timerSeconds : 0);
       await onSave({
         title,
         notes,
@@ -271,6 +389,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         timeEstimate,
         status: isDone ? 'completed' : 'needsAction',
         completedAt: isDone ? (task.completedAt || new Date().toISOString()) : undefined,
+        dependsOn,
+        timeLogs,
+        totalTimeSpentSeconds: finalTotalSeconds,
       });
       onClose();
     } catch (err) {
@@ -310,6 +431,18 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {onEnterFocusMode && (
+              <button
+                type="button"
+                onClick={() => onEnterFocusMode(task)}
+                className="px-2.5 py-1 text-xs font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg flex items-center gap-1.5 transition-colors shadow-2xs"
+                title="Enter Focus Mode for this task"
+              >
+                <Flame className="w-3.5 h-3.5 fill-current" />
+                <span>Focus Mode</span>
+              </button>
+            )}
+
             <button
               onClick={() => onDelete(task)}
               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -328,6 +461,22 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {/* Blocked Dependency Alert Banner */}
+          {isBlocked && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-800 text-xs shadow-2xs">
+              <ShieldAlert className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">This task is currently Blocked!</p>
+                <p className="text-[11px] text-rose-700 mt-0.5">
+                  Needs completion of {uncompletedPrereqs.length} prerequisite task(s):{' '}
+                  <span className="font-semibold">
+                    {uncompletedPrereqs.map((t) => t.title).join(', ')}
+                  </span>
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Title */}
           <div>
             <input
@@ -460,6 +609,253 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 />
               </div>
             </div>
+          </div>
+
+          {/* TASK DEPENDENCIES / PREREQUISITES */}
+          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                <Link2 className="w-3.5 h-3.5 text-indigo-600" />
+                Task Dependencies & Pre-requisites ({dependsOn.length})
+              </label>
+              {isBlocked && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
+                  ⛔ Blocked
+                </span>
+              )}
+            </div>
+
+            {/* List of current dependencies */}
+            {prerequisiteTasks.length > 0 ? (
+              <div className="space-y-1.5">
+                {prerequisiteTasks.map((dep) => {
+                  const isDepCompleted = dep.status === 'completed';
+                  return (
+                    <div
+                      key={dep.id}
+                      className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-colors ${
+                        isDepCompleted
+                          ? 'bg-emerald-50/50 border-emerald-200 text-emerald-900'
+                          : 'bg-amber-50/60 border-amber-200 text-amber-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate flex-1 min-w-0">
+                        {isDepCompleted ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        ) : (
+                          <Clock className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                        )}
+                        <span className="font-medium truncate">{dep.title}</span>
+                        <span className="text-[10px] text-slate-500 flex-shrink-0">
+                          {isDepCompleted ? '(Completed)' : '(Pending)'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveDependency(dep.id)}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                        title="Remove dependency"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400 italic">
+                No dependencies configured. This task can be started right away.
+              </p>
+            )}
+
+            {/* Add Dependency Selector */}
+            {availableDependencyTasks.length > 0 && (
+              <div className="flex gap-2 pt-1">
+                <select
+                  value={selectedDepTaskId}
+                  onChange={(e) => setSelectedDepTaskId(e.target.value)}
+                  className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg outline-none focus:border-indigo-500"
+                >
+                  <option value="">Select a prerequisite task this depends on...</option>
+                  {availableDependencyTasks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.status === 'completed' ? '✓ ' : '• '} {t.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handleAddDependency(selectedDepTaskId)}
+                  disabled={!selectedDepTaskId}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* START/STOP TIMER & PRODUCTIVITY TIME TRACKING */}
+          <div className="p-3.5 bg-gradient-to-br from-slate-50 to-purple-50/30 rounded-xl border border-purple-200/80 space-y-3.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-purple-600" />
+                Productivity Timer & Time Logged
+              </label>
+
+              {/* Total Time Badge */}
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                Total: {formatSecondsToHuman(totalTimeSpentSeconds + (isTimerRunning ? timerSeconds : 0))}
+              </span>
+            </div>
+
+            {/* Start / Stop Timer Bar */}
+            <div className="p-3 bg-white rounded-xl border border-purple-100 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleToggleTimer}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all active:scale-95 ${
+                    isTimerRunning
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                >
+                  {isTimerRunning ? (
+                    <>
+                      <Pause className="w-4 h-4 fill-current" /> Stop & Log
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4 fill-current" /> Start Timer
+                    </>
+                  )}
+                </button>
+
+                <div className="font-mono text-base font-bold text-slate-800">
+                  {Math.floor(timerSeconds / 3600) > 0 && (
+                    <span>{String(Math.floor(timerSeconds / 3600)).padStart(2, '0')}:</span>
+                  )}
+                  <span>{String(Math.floor((timerSeconds % 3600) / 60)).padStart(2, '0')}:</span>
+                  <span>{String(timerSeconds % 60).padStart(2, '0')}</span>
+                </div>
+              </div>
+
+              {/* Quick Minutes Log */}
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-[10px] text-slate-400 font-semibold mr-1">Quick Log:</span>
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogMinutes(15)}
+                  className="px-2 py-1 bg-slate-100 hover:bg-purple-100 hover:text-purple-700 rounded-md font-semibold text-slate-600 transition-colors"
+                >
+                  +15m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogMinutes(30)}
+                  className="px-2 py-1 bg-slate-100 hover:bg-purple-100 hover:text-purple-700 rounded-md font-semibold text-slate-600 transition-colors"
+                >
+                  +30m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogMinutes(60)}
+                  className="px-2 py-1 bg-slate-100 hover:bg-purple-100 hover:text-purple-700 rounded-md font-semibold text-slate-600 transition-colors"
+                >
+                  +1h
+                </button>
+              </div>
+            </div>
+
+            {/* Task Mini Chart: Time spent vs Estimate & Subtask completion */}
+            <div className="p-3 bg-white rounded-xl border border-slate-200/80 space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+                Task Progress & Productivity Metrics
+              </span>
+
+              {/* Subtasks Progress Bar */}
+              <div>
+                <div className="flex justify-between text-[11px] mb-1 text-slate-600">
+                  <span>Subtask Checklist</span>
+                  <span className="font-bold">
+                    {subtasks.filter((s) => s.completed).length} of {subtasks.length} done
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                  <div
+                    className="bg-blue-600 h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${
+                        subtasks.length > 0
+                          ? (subtasks.filter((s) => s.completed).length / subtasks.length) * 100
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Time Spent vs Estimate Bar */}
+              {timeEstimate && (
+                <div className="pt-1">
+                  <div className="flex justify-between text-[11px] mb-1 text-slate-600">
+                    <span>Time Spent vs Estimate ({timeEstimate})</span>
+                    <span className="font-bold">
+                      {formatSecondsToHuman(totalTimeSpentSeconds + (isTimerRunning ? timerSeconds : 0))}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-purple-600 h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.max(10, ((totalTimeSpentSeconds + (isTimerRunning ? timerSeconds : 0)) / 3600) * 50)
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Time Log Entries History */}
+            {timeLogs.length > 0 && (
+              <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                  Recent Work Sessions ({timeLogs.length})
+                </span>
+                {timeLogs.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between p-1.5 rounded-lg bg-white border border-slate-200/80 text-[11px]"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="font-bold text-purple-700">
+                        {formatSecondsToHuman(entry.seconds)}
+                      </span>
+                      <span className="text-slate-600 truncate">{entry.note || 'Work session'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(entry.timestamp).toLocaleDateString([], {
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTimeLog(entry.id)}
+                        className="text-slate-400 hover:text-rose-600"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Description & Notes */}

@@ -27,14 +27,17 @@ import {
   updateTask,
   deleteTask,
   clearCompletedTasks,
+  computeNextRecurringDueDate,
 } from './services/tasksApi';
 import {
   fetchCalendarEvents,
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
+  fetchTodayMeetings,
 } from './services/calendarApi';
 import { fetchContacts } from './services/peopleApi';
+import type { CalendarMeeting, AppNotification } from './types/gqueues';
 
 import { AuthScreen } from './components/AuthScreen';
 import { Header } from './components/Header';
@@ -43,7 +46,11 @@ import { TaskList } from './components/TaskList';
 import { KanbanBoard } from './components/KanbanBoard';
 import { CalendarView } from './components/CalendarView';
 import { CompletedView } from './components/CompletedView';
+import { DashboardView } from './components/DashboardView';
 import { TaskDetailModal } from './components/TaskDetailModal';
+import { FocusModeModal } from './components/FocusModeModal';
+import { MeetingCheckerModal } from './components/MeetingCheckerModal';
+import { ToastNotificationSystem, playNotificationChime } from './components/ToastNotificationSystem';
 import { DrivePickerModal } from './components/DrivePickerModal';
 import { NewQueueModal } from './components/NewQueueModal';
 import { ConfirmModal } from './components/ConfirmModal';
@@ -70,6 +77,15 @@ export default function App() {
   const [allTasksCache, setAllTasksCache] = useState<Record<string, GQueueTask[]>>({});
   const [contacts, setContacts] = useState<GoogleContact[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
+
+  // Meetings & Notifications states
+  const [isMeetingCheckerOpen, setIsMeetingCheckerOpen] = useState(false);
+  const [todayMeetings, setTodayMeetings] = useState<CalendarMeeting[]>([]);
+  const [isLoadingMeetings, setIsLoadingMeetings] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  // Focus Mode state
+  const [focusModeTask, setFocusModeTask] = useState<GQueueTask | null>(null);
 
   // UI state
   const [isSyncing, setIsSyncing] = useState(false);
@@ -101,6 +117,17 @@ export default function App() {
     message: '',
     onConfirm: () => {},
   });
+
+  const addNotification = useCallback((notif: Omit<AppNotification, 'id' | 'timestamp'>) => {
+    const id = 'notif-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    const newNotif: AppNotification = {
+      ...notif,
+      id,
+      timestamp: new Date().toISOString(),
+    };
+    setNotifications((prev) => [newNotif, ...prev.slice(0, 7)]);
+    playNotificationChime();
+  }, []);
 
   // Initialize auth listener
   useEffect(() => {
@@ -186,12 +213,16 @@ export default function App() {
       const domain = userEmail.includes('@') ? userEmail.split('@')[1] : 'coolaireconsolidated.com';
       fetchContacts(accessToken, domain).then(setContacts).catch(console.warn);
 
-      // 4. Fetch Google Calendar events (in background)
+      // 4. Fetch Google Calendar events & today meetings (in background)
       const now = new Date();
       const pastMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const nextMonth = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
       fetchCalendarEvents(accessToken, pastMonth, nextMonth)
         .then(setCalendarEvents)
+        .catch(console.warn);
+
+      fetchTodayMeetings(accessToken)
+        .then(setTodayMeetings)
         .catch(console.warn);
 
       // 5. Preload tasks from other queues for Smart Queues calculation
@@ -487,10 +518,204 @@ export default function App() {
     }
   };
 
-  // Toggle Complete / Uncomplete
+  // Meeting Checker handler
+  const handleCheckMeetings = useCallback(async () => {
+    if (!token) return;
+    setIsLoadingMeetings(true);
+    try {
+      const freshMeetings = await fetchTodayMeetings(token);
+      setTodayMeetings(freshMeetings);
+      setIsMeetingCheckerOpen(true);
+      if (freshMeetings.length > 0) {
+        addNotification({
+          title: `Schedule Checked (${freshMeetings.length} meetings)`,
+          message: `You have ${freshMeetings.length} meeting(s) on your Google Calendar today.`,
+          type: 'meeting',
+          meetingLink: freshMeetings[0].hangoutLink,
+        });
+      } else {
+        addNotification({
+          title: 'Schedule All Clear',
+          message: 'No Google Calendar meetings found for today.',
+          type: 'info',
+        });
+      }
+    } catch (err: any) {
+      console.warn('Meeting check failed:', err);
+      setIsMeetingCheckerOpen(true);
+    } finally {
+      setIsLoadingMeetings(false);
+    }
+  }, [token, addNotification]);
+
+  // Calendar Event CRUD handlers for interactive Calendar View
+  const handleSaveCalendarEvent = async (eventData: {
+    id?: string;
+    summary: string;
+    description?: string;
+    dueDate?: string;
+    startTime?: string;
+    endTime?: string;
+    location?: string;
+    attendees?: Array<{ email: string; displayName?: string }>;
+    addGoogleMeet?: boolean;
+  }) => {
+    if (!token) return;
+    try {
+      if (eventData.id) {
+        const updated = await updateCalendarEvent(token, eventData.id, eventData);
+        setCalendarEvents((prev) =>
+          prev.map((e) => (e.id === updated.id ? { ...e, ...updated } : e))
+        );
+        addNotification({
+          title: 'Meeting Updated',
+          message: `"${updated.summary}" updated on Google Calendar.`,
+          type: 'success',
+          meetingLink: updated.hangoutLink,
+        });
+      } else {
+        const created = await createCalendarEvent(token, eventData);
+        setCalendarEvents((prev) => [...prev, created]);
+        addNotification({
+          title: 'Meeting Scheduled',
+          message: `"${created.summary}" added to Google Calendar.`,
+          type: 'success',
+          meetingLink: created.hangoutLink,
+        });
+      }
+      fetchTodayMeetings(token).then(setTodayMeetings).catch(console.warn);
+    } catch (err: any) {
+      console.error('Failed to save calendar event:', err);
+      addNotification({
+        title: 'Calendar Error',
+        message: err.message || 'Failed to save event to Google Calendar',
+        type: 'warning',
+      });
+    }
+  };
+
+  const handleDeleteCalendarEvent = async (eventId: string) => {
+    if (!token) return;
+    try {
+      await deleteCalendarEvent(token, eventId);
+      setCalendarEvents((prev) => prev.filter((e) => e.id !== eventId));
+      setTodayMeetings((prev) => prev.filter((m) => m.id !== eventId));
+      addNotification({
+        title: 'Meeting Deleted',
+        message: 'The meeting was removed from Google Calendar.',
+        type: 'info',
+      });
+    } catch (err: any) {
+      console.error('Failed to delete calendar event:', err);
+      addNotification({
+        title: 'Delete Failed',
+        message: err.message || 'Failed to delete calendar event',
+        type: 'warning',
+      });
+    }
+  };
+
+  const handleConvertEventToTask = async (event: GoogleCalendarEvent) => {
+    const targetQueueId = activeQueueId || queues[0]?.id;
+    if (!targetQueueId || !token) return;
+    const taskTitle = event.summary.replace(/^\[GQueues\]\s*/i, '');
+    const dateStr = event.start.dateTime
+      ? event.start.dateTime.split('T')[0]
+      : event.start.date || undefined;
+
+    const notes = [
+      event.description || '',
+      event.hangoutLink ? `Google Meet: ${event.hangoutLink}` : '',
+      event.location ? `Location: ${event.location}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    try {
+      const created = await createTask(token, targetQueueId, {
+        title: `Prep: ${taskTitle}`,
+        notes,
+        due: dateStr,
+        priority: 'medium',
+      });
+      setTasks((prev) => [created, ...prev]);
+      setAllTasksCache((prev) => ({
+        ...prev,
+        [targetQueueId]: [created, ...(prev[targetQueueId] || [])],
+      }));
+      addNotification({
+        title: 'Task Created from Meeting',
+        message: `Task "Prep: ${taskTitle}" added to your queue.`,
+        type: 'success',
+        taskId: created.id,
+      });
+    } catch (err) {
+      console.error('Failed to convert event to task:', err);
+    }
+  };
+
+  // Productivity Time Logging
+  const handleLogTimeSpent = async (taskId: string, seconds: number, note?: string) => {
+    const targetTask = allTasksCombined.find((t) => t.id === taskId);
+    if (!targetTask || !token) return;
+
+    const newLog = {
+      id: 'log-' + Date.now(),
+      seconds,
+      timestamp: new Date().toISOString(),
+      note: note || 'Work session',
+    };
+    const nextLogs = [newLog, ...(targetTask.timeLogs || [])];
+    const nextTotal = (targetTask.totalTimeSpentSeconds || 0) + seconds;
+
+    try {
+      const updated = await updateTask(token, targetTask.listId, taskId, {
+        timeLogs: nextLogs,
+        totalTimeSpentSeconds: nextTotal,
+      });
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t)));
+      setAllTasksCache((prev) => {
+        const copy = { ...prev };
+        if (copy[targetTask.listId]) {
+          copy[targetTask.listId] = copy[targetTask.listId].map((t) =>
+            t.id === taskId ? { ...t, ...updated } : t
+          );
+        }
+        return copy;
+      });
+      if (selectedTaskForDetail?.id === taskId) {
+        setSelectedTaskForDetail((prev) => (prev ? { ...prev, ...updated } : null));
+      }
+      addNotification({
+        title: 'Time Logged',
+        message: `Productivity recorded for "${targetTask.title}".`,
+        type: 'timer',
+        taskId,
+      });
+    } catch (err) {
+      console.error('Failed to log time:', err);
+    }
+  };
+
+  // Toggle Complete / Uncomplete with Dependency Protection & Recurring Auto-Schedule
   const handleToggleComplete = async (task: GQueueTask) => {
     if (!token) return;
     const newStatus = task.status === 'completed' ? 'needsAction' : 'completed';
+
+    // 1. Dependency check: if completing, verify uncompleted prerequisites
+    if (newStatus === 'completed' && task.dependsOn && task.dependsOn.length > 0) {
+      const prereqs = allTasksCombined.filter((t) => task.dependsOn?.includes(t.id));
+      const uncompleted = prereqs.filter((t) => t.status !== 'completed');
+      if (uncompleted.length > 0) {
+        const proceed = window.confirm(
+          `⚠️ Task Dependency Notice:\nThis task depends on ${uncompleted.length} unfinished prerequisite task(s):\n\n` +
+            uncompleted.map((t) => `• ${t.title}`).join('\n') +
+            `\n\nMark as completed anyway?`
+        );
+        if (!proceed) return;
+      }
+    }
+
     const completedDate = newStatus === 'completed' ? new Date().toISOString() : undefined;
     const newKanbanStatus: KanbanStatus = newStatus === 'completed' ? 'done' : 'todo';
 
@@ -507,6 +732,44 @@ export default function App() {
       ...prev,
       [task.listId]: (prev[task.listId] || []).map((t) => (t.id === task.id ? updated : t)),
     }));
+
+    if (newStatus === 'completed') {
+      addNotification({
+        title: 'Task Completed! 🎉',
+        message: `"${task.title}" was marked as completed.`,
+        type: 'success',
+      });
+
+      // 2. Recurring Task Auto-Schedule: generate the next occurrence if recurring
+      if (task.recurring && task.recurring !== 'none') {
+        const nextDue = computeNextRecurringDueDate(task.due, task.recurring, task.recurrenceRule);
+        createTask(token, task.listId, {
+          title: task.title,
+          notes: task.notes,
+          priority: task.priority,
+          due: nextDue,
+          tags: task.tags,
+          recurring: task.recurring,
+          recurrenceRule: task.recurrenceRule,
+          timeEstimate: task.timeEstimate,
+          assignedContact: task.assignedContact,
+        })
+          .then((nextTask) => {
+            setTasks((prev) => [nextTask, ...prev]);
+            setAllTasksCache((prev) => ({
+              ...prev,
+              [task.listId]: [nextTask, ...(prev[task.listId] || [])],
+            }));
+            addNotification({
+              title: 'Next Recurring Task Created',
+              message: `"${task.title}" repeated for ${nextDue}.`,
+              type: 'info',
+              taskId: nextTask.id,
+            });
+          })
+          .catch(console.warn);
+      }
+    }
 
     try {
       await updateTask(token, task.listId, task.id, {
@@ -1014,8 +1277,10 @@ export default function App() {
         onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
         isMobileSidebarOpen={isMobileSidebarOpen}
         completedCount={smartCounts.completed}
+        todayMeetingsCount={todayMeetings.length}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
+        onOpenMeetingChecker={handleCheckMeetings}
       />
 
       {/* Main Layout Area */}
@@ -1041,13 +1306,14 @@ export default function App() {
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
 
-        {/* Center / Right Content: 4 Main Views */}
+        {/* Center / Right Content: 5 Main Views */}
         <main className="flex-1 flex flex-col overflow-hidden">
           {currentView === 'tasks' && (
             <TaskList
               currentQueue={currentQueue}
               smartQueueType={activeSmartQueue}
               tasks={tasksToRender}
+              allTasks={allTasksCombined}
               allQueues={queues}
               searchQuery={searchQuery}
               selectedTag={selectedTag}
@@ -1065,18 +1331,21 @@ export default function App() {
               onBatchDelete={handleBatchDelete}
               onOpenCompletedView={() => setCurrentView('completed')}
               onOpenKanbanView={() => setCurrentView('kanban')}
+              onEnterFocusMode={(task) => setFocusModeTask(task)}
             />
           )}
 
           {currentView === 'kanban' && (
             <KanbanBoard
               tasks={activeQueueId ? tasks : allTasksCombined}
+              allTasks={allTasksCombined}
               queues={queues}
               currentQueue={currentQueue}
               onSelectTask={setSelectedTaskForDetail}
               onUpdateTaskStatus={handleUpdateTaskKanbanStatus}
               onQuickAddTask={handleQuickAddKanbanTask}
               onToggleComplete={handleToggleComplete}
+              onEnterFocusMode={(task) => setFocusModeTask(task)}
             />
           )}
 
@@ -1084,11 +1353,31 @@ export default function App() {
             <CalendarView
               tasks={allTasksCombined}
               calendarEvents={calendarEvents}
+              contacts={contacts}
               onSelectTask={setSelectedTaskForDetail}
               onToggleComplete={handleToggleComplete}
               onAddTask={(dateStr) => {
                 handleQuickAddTask('New Task', dateStr);
               }}
+              onCreateEvent={handleSaveCalendarEvent}
+              onUpdateEvent={(id, data) => handleSaveCalendarEvent({ summary: data.summary || '', ...data, id })}
+              onDeleteEvent={handleDeleteCalendarEvent}
+              onConvertEventToTask={handleConvertEventToTask}
+            />
+          )}
+
+          {currentView === 'dashboard' && (
+            <DashboardView
+              tasks={tasksToRender}
+              allTasks={allTasksCombined}
+              queues={queues}
+              onSelectTask={setSelectedTaskForDetail}
+              onSelectQueue={(queueId) => {
+                setActiveQueueId(queueId);
+                setActiveSmartQueue(null);
+                setCurrentView('tasks');
+              }}
+              onOpenCompletedView={() => setCurrentView('completed')}
             />
           )}
 
@@ -1154,6 +1443,7 @@ export default function App() {
       {selectedTaskForDetail && (
         <TaskDetailModal
           task={selectedTaskForDetail}
+          allTasks={allTasksCombined}
           isOpen={true}
           contacts={contacts}
           accessToken={token}
@@ -1164,6 +1454,8 @@ export default function App() {
           onOpenDrivePicker={() => setIsDrivePickerOpen(true)}
           onSyncCalendar={handleSyncTaskToCalendar}
           onUnsyncCalendar={handleUnsyncTaskFromCalendar}
+          onEnterFocusMode={(task) => setFocusModeTask(task)}
+          onLogTimeSpent={handleLogTimeSpent}
           onRefreshContacts={async () => {
             if (token) {
               const domain = user?.email?.includes('@') ? user.email.split('@')[1] : 'coolaireconsolidated.com';
@@ -1223,6 +1515,48 @@ export default function App() {
 
       {/* Offline Status Toast Indicator */}
       <OfflineIndicator />
+
+      {/* Destructive Action User Confirmation Modal */}
+      {/* Deep Work Focus Mode Modal */}
+      {focusModeTask && (
+        <FocusModeModal
+          isOpen={true}
+          task={focusModeTask}
+          allTasks={allTasksCombined}
+          onClose={() => setFocusModeTask(null)}
+          onLogTime={handleLogTimeSpent}
+          onToggleSubtask={(taskId, subId) => {
+            const t = allTasksCombined.find((x) => x.id === taskId);
+            if (t) handleToggleSubtask(t, subId);
+          }}
+          onCompleteTask={(t) => handleToggleComplete(t)}
+        />
+      )}
+
+      {/* Google Workspace Meeting Checker Modal */}
+      <MeetingCheckerModal
+        isOpen={isMeetingCheckerOpen}
+        onClose={() => setIsMeetingCheckerOpen(false)}
+        meetings={todayMeetings}
+        isLoading={isLoadingMeetings}
+        onRefreshMeetings={handleCheckMeetings}
+        onCreateTaskFromMeeting={handleConvertEventToTask}
+        todayTasks={allTasksCombined.filter((t) => {
+          if (!t.due) return false;
+          return t.due.split('T')[0] === new Date().toISOString().split('T')[0];
+        })}
+      />
+
+      {/* Real-time Toast Notification System */}
+      <ToastNotificationSystem
+        notifications={notifications}
+        onDismiss={(id) => setNotifications((prev) => prev.filter((n) => n.id !== id))}
+        onClearAll={() => setNotifications([])}
+        onSelectTask={(taskId) => {
+          const found = allTasksCombined.find((t) => t.id === taskId);
+          if (found) setSelectedTaskForDetail(found);
+        }}
+      />
 
       {/* Destructive Action User Confirmation Modal */}
       <ConfirmModal

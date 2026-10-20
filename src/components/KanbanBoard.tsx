@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import type { GQueueTask, KanbanStatus, Priority, QueueList } from '../types/gqueues';
+import { formatSecondsToHuman } from '../services/tasksApi';
 import {
   Plus,
   Clock,
@@ -13,17 +14,22 @@ import {
   ArrowLeft,
   UserCheck,
   Tag,
-  Star
+  Star,
+  ShieldAlert,
+  Link2,
+  Flame,
 } from 'lucide-react';
 
 interface KanbanBoardProps {
   tasks: GQueueTask[];
+  allTasks?: GQueueTask[];
   queues: QueueList[];
   currentQueue: QueueList | null;
   onSelectTask: (task: GQueueTask) => void;
   onUpdateTaskStatus: (task: GQueueTask, status: KanbanStatus) => Promise<void>;
   onQuickAddTask: (title: string, status: KanbanStatus) => Promise<void>;
   onToggleComplete: (task: GQueueTask) => Promise<void>;
+  onEnterFocusMode?: (task: GQueueTask) => void;
 }
 
 const COLUMNS: Array<{ id: KanbanStatus; title: string; color: string; bg: string }> = [
@@ -35,12 +41,14 @@ const COLUMNS: Array<{ id: KanbanStatus; title: string; color: string; bg: strin
 
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   tasks,
+  allTasks = [],
   queues,
   currentQueue,
   onSelectTask,
   onUpdateTaskStatus,
   onQuickAddTask,
   onToggleComplete,
+  onEnterFocusMode,
 }) => {
   const [columnInput, setColumnInput] = useState<Record<KanbanStatus, string>>({
     todo: '',
@@ -204,7 +212,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                           isDone ? 'opacity-70 bg-slate-50/80' : ''
                         }`}
                       >
-                        {/* Top row: Priority, Queue, Star */}
+                        {/* Top row: Priority, Queue, Star & Focus */}
                         <div className="flex items-center justify-between gap-1 text-[10px]">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {getPriorityBadge(task.priority)}
@@ -219,8 +227,50 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                 {queue.title}
                               </span>
                             )}
+                            {/* Dependency badge */}
+                            {task.dependsOn && task.dependsOn.length > 0 && (() => {
+                              const prereqList = (allTasks || tasks).filter((t) => task.dependsOn?.includes(t.id));
+                              const blockedBy = prereqList.filter((t) => t.status !== 'completed');
+                              const isBlocked = blockedBy.length > 0;
+                              return (
+                                <span
+                                  className={`inline-flex items-center gap-0.5 text-[9px] px-1 py-0.2 rounded font-bold border ${
+                                    isBlocked
+                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  }`}
+                                  title={
+                                    isBlocked
+                                      ? `Blocked by ${blockedBy.length} task(s): ${blockedBy.map((t) => t.title).join(', ')}`
+                                      : `All ${task.dependsOn.length} prerequisites completed!`
+                                  }
+                                >
+                                  {isBlocked ? (
+                                    <ShieldAlert className="w-2.5 h-2.5 text-rose-600" />
+                                  ) : (
+                                    <Link2 className="w-2.5 h-2.5 text-emerald-600" />
+                                  )}
+                                  <span>{isBlocked ? `Blocked (${blockedBy.length})` : `${task.dependsOn.length} deps`}</span>
+                                </span>
+                              );
+                            })()}
                           </div>
-                          {task.starred && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />}
+                          <div className="flex items-center gap-1">
+                            {onEnterFocusMode && !isDone && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEnterFocusMode(task);
+                                }}
+                                className="p-0.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                                title="Enter Focus Mode"
+                              >
+                                <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-100" />
+                              </button>
+                            )}
+                            {task.starred && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />}
+                          </div>
                         </div>
 
                         {/* Title */}
@@ -241,11 +291,20 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
                         {/* Metadata row */}
                         <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px] text-slate-400">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             {task.due && (
                               <span className="flex items-center gap-1 text-slate-600">
                                 <Calendar className="w-3 h-3 text-blue-500" />
                                 {task.due.split('T')[0]}
+                              </span>
+                            )}
+                            {task.totalTimeSpentSeconds > 0 && (
+                              <span
+                                className="inline-flex items-center gap-0.5 text-[9px] text-purple-700 bg-purple-50 border border-purple-200 px-1 py-0.2 rounded font-bold"
+                                title={`Time logged: ${formatSecondsToHuman(task.totalTimeSpentSeconds)}`}
+                              >
+                                <Clock className="w-2.5 h-2.5 text-purple-600" />
+                                <span>{formatSecondsToHuman(task.totalTimeSpentSeconds)}</span>
                               </span>
                             )}
                             {task.subtasks.length > 0 && (

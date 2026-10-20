@@ -10,7 +10,9 @@ export interface CreateCalendarEventParams {
   description?: string;
   dueDate?: string; // YYYY-MM-DD or ISO
   timeEstimate?: string;
+  location?: string;
   attendees?: CalendarEventAttendee[];
+  addGoogleMeet?: boolean;
   sendUpdates?: 'all' | 'none' | 'externalOnly';
 }
 
@@ -19,6 +21,7 @@ export interface UpdateCalendarEventParams {
   description?: string;
   dueDate?: string;
   timeEstimate?: string;
+  location?: string;
   attendees?: CalendarEventAttendee[];
   sendUpdates?: 'all' | 'none' | 'externalOnly';
 }
@@ -59,6 +62,12 @@ export async function fetchCalendarEvents(
     start: e.start || {},
     end: e.end || {},
     htmlLink: e.htmlLink,
+    hangoutLink:
+      e.hangoutLink ||
+      e.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri,
+    location: e.location,
+    attendees: e.attendees || [],
+    status: e.status,
   }));
 }
 
@@ -161,10 +170,8 @@ export async function createCalendarEvent(
   }
 
   const payload: any = {
-    summary: `[GQueues] ${params.summary}`,
-    description: params.description
-      ? `${params.description}\n\nSynced from GQueues Workspace Manager`
-      : 'Synced from GQueues Workspace Manager',
+    summary: params.summary,
+    description: params.description || '',
     start,
     end,
     reminders: {
@@ -172,7 +179,11 @@ export async function createCalendarEvent(
     },
   };
 
-  // If attendees (e.g. assigned colleague) are provided, add them so the event appears on their calendar!
+  if (params.location) {
+    payload.location = params.location;
+  }
+
+  // If attendees are provided, add them
   if (params.attendees && params.attendees.length > 0) {
     payload.attendees = params.attendees.map((a) => ({
       email: a.email,
@@ -180,9 +191,18 @@ export async function createCalendarEvent(
     }));
   }
 
-  // sendUpdates=all delivers the invitation email and adds it directly to the assignee's Google Calendar
+  // If Google Meet is requested, generate video conference
+  if (params.addGoogleMeet) {
+    payload.conferenceData = {
+      createRequest: {
+        requestId: 'meet-' + Date.now(),
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    };
+  }
+
   const sendUpdatesParam = params.sendUpdates || (params.attendees?.length ? 'all' : 'none');
-  const query = `?sendUpdates=${sendUpdatesParam}`;
+  const query = `?sendUpdates=${sendUpdatesParam}&conferenceDataVersion=1`;
 
   const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events${query}`, {
     method: 'POST',
@@ -206,6 +226,12 @@ export async function createCalendarEvent(
     start: created.start,
     end: created.end,
     htmlLink: created.htmlLink,
+    hangoutLink:
+      created.hangoutLink ||
+      created.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri,
+    location: created.location,
+    attendees: created.attendees || [],
+    status: created.status,
   };
 }
 
@@ -217,11 +243,15 @@ export async function updateCalendarEvent(
   const payload: any = {};
 
   if (params.summary) {
-    payload.summary = `[GQueues] ${params.summary}`;
+    payload.summary = params.summary;
   }
 
   if (params.description !== undefined) {
-    payload.description = `${params.description}\n\nSynced from GQueues Workspace Manager`;
+    payload.description = params.description;
+  }
+
+  if (params.location !== undefined) {
+    payload.location = params.location;
   }
 
   if (params.dueDate) {
@@ -245,7 +275,7 @@ export async function updateCalendarEvent(
 
   const sendUpdatesParam = params.sendUpdates || 'all';
   const res = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=${sendUpdatesParam}`,
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=${sendUpdatesParam}&conferenceDataVersion=1`,
     {
       method: 'PATCH',
       headers: {
@@ -269,6 +299,12 @@ export async function updateCalendarEvent(
     start: updated.start,
     end: updated.end,
     htmlLink: updated.htmlLink,
+    hangoutLink:
+      updated.hangoutLink ||
+      updated.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri,
+    location: updated.location,
+    attendees: updated.attendees || [],
+    status: updated.status,
   };
 }
 

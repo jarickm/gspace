@@ -1,11 +1,12 @@
 import React from 'react';
-import type { SmartQueueType, ViewMode } from '../types/gqueues';
+import type { ViewMode, SmartQueueType } from '../types/gqueues';
 import {
   ListTodo,
   Calendar,
   Plus,
   Kanban,
   CheckCircle2,
+  BarChart3,
 } from 'lucide-react';
 
 interface MobileBottomNavProps {
@@ -74,7 +75,18 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         <span className="text-[10px]">Calendar</span>
       </button>
 
-      {/* 5. Completed Tasks */}
+      {/* 5. Dashboard Charts */}
+      <button
+        onClick={() => onSelectView('dashboard')}
+        className={`flex flex-col items-center justify-center gap-1 w-14 transition-all ${
+          currentView === 'dashboard' ? 'text-purple-700 font-bold' : 'text-slate-600 hover:text-purple-600'
+        }`}
+      >
+        <BarChart3 className="w-5 h-5 text-purple-600" />
+        <span className="text-[10px]">Charts</span>
+      </button>
+
+      {/* 6. Completed Tasks */}
       <button
         onClick={() => onSelectView('completed')}
         className={`flex flex-col items-center justify-center gap-1 relative w-14 transition-all ${
@@ -84,7 +96,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         }`}
       >
         <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-        <span className="text-[10px]">Completed</span>
+        <span className="text-[10px]">Done</span>
         {completedCount > 0 && (
           <span className="absolute top-0 right-2 w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] font-bold flex items-center justify-center">
             {completedCount > 99 ? '99+' : completedCount}

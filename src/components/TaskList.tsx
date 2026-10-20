@@ -30,12 +30,17 @@ import {
   Layers,
   Sparkles,
   RotateCcw,
+  Flame,
+  Link2,
+  ShieldAlert,
 } from 'lucide-react';
+import { formatSecondsToHuman } from '../services/tasksApi';
 
 interface TaskListProps {
   currentQueue: QueueList | null;
   smartQueueType: SmartQueueType | null;
   tasks: GQueueTask[];
+  allTasks?: GQueueTask[];
   allQueues: QueueList[];
   searchQuery: string;
   selectedTag: string | null;
@@ -54,12 +59,14 @@ interface TaskListProps {
   onBatchDelete?: (tasks: GQueueTask[]) => void;
   onOpenCompletedView?: () => void;
   onOpenKanbanView?: () => void;
+  onEnterFocusMode?: (task: GQueueTask) => void;
 }
 
 export const TaskList: React.FC<TaskListProps> = ({
   currentQueue,
   smartQueueType,
   tasks,
+  allTasks = [],
   allQueues,
   searchQuery,
   selectedTag,
@@ -78,6 +85,7 @@ export const TaskList: React.FC<TaskListProps> = ({
   onBatchDelete,
   onOpenCompletedView,
   onOpenKanbanView,
+  onEnterFocusMode,
 }) => {
   // Quick Add input state
   const [quickTitle, setQuickTitle] = useState('');
@@ -656,6 +664,45 @@ export const TaskList: React.FC<TaskListProps> = ({
                             </span>
                           </span>
                         )}
+
+                        {/* Task Dependency / Blocked indicator */}
+                        {task.dependsOn && task.dependsOn.length > 0 && (() => {
+                          const prereqList = (allTasks || tasks).filter((t) => task.dependsOn?.includes(t.id));
+                          const blockedBy = prereqList.filter((t) => t.status !== 'completed');
+                          const isBlocked = blockedBy.length > 0;
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-bold border transition-colors ${
+                                isBlocked
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}
+                              title={
+                                isBlocked
+                                  ? `Blocked by ${blockedBy.length} task(s): ${blockedBy.map((t) => t.title).join(', ')}`
+                                  : `All ${task.dependsOn.length} prerequisites completed!`
+                              }
+                            >
+                              {isBlocked ? (
+                                <ShieldAlert className="w-3 h-3 text-rose-600" />
+                              ) : (
+                                <Link2 className="w-3 h-3 text-emerald-600" />
+                              )}
+                              <span>{isBlocked ? `Blocked (${blockedBy.length})` : `${task.dependsOn.length} deps`}</span>
+                            </span>
+                          );
+                        })()}
+
+                        {/* Total time spent badge */}
+                        {task.totalTimeSpentSeconds > 0 && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded font-bold"
+                            title={`Time logged: ${formatSecondsToHuman(task.totalTimeSpentSeconds)}`}
+                          >
+                            <Clock className="w-3 h-3 text-purple-600" />
+                            <span>{formatSecondsToHuman(task.totalTimeSpentSeconds)}</span>
+                          </span>
+                        )}
                       </div>
 
                       {/* Notes snippet */}
@@ -717,6 +764,16 @@ export const TaskList: React.FC<TaskListProps> = ({
                       className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {onEnterFocusMode && (
+                        <button
+                          type="button"
+                          onClick={() => onEnterFocusMode(task)}
+                          className="p-1.5 text-slate-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors"
+                          title="Enter Focus Mode"
+                        >
+                          <Flame className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => onSelectTask(task)}
                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
