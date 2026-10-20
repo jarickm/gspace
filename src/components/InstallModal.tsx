@@ -147,6 +147,25 @@ export const InstallModal: React.FC<InstallModalProps> = ({ isOpen, onClose }) =
                   <Download className="w-4 h-4 stroke-[2.5]" />
                   <span>Download GQueues-Workspace.apk</span>
                 </a>
+
+                {/* 3 Steps to Install the APK */}
+                <div className="mt-3 pt-3 border-t border-emerald-200/80 space-y-1.5 text-xs text-emerald-950">
+                  <span className="font-bold text-[11px] uppercase tracking-wider text-emerald-800 block">
+                    How to install the downloaded APK:
+                  </span>
+                  <div className="flex items-start gap-2 text-[11px] leading-relaxed">
+                    <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">1</span>
+                    <span>Tap <strong>Download GQueues-Workspace.apk</strong> above. The file saves to your phone's <strong>Downloads</strong> folder.</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-[11px] leading-relaxed">
+                    <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">2</span>
+                    <span>Pull down your notification shade or open your <strong>Files / Downloads</strong> app, then tap <strong>GQueues-Workspace.apk</strong>.</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-[11px] leading-relaxed">
+                    <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">3</span>
+                    <span>Tap <strong>Install</strong>. If prompted with "Install unknown apps", toggle <strong>Allow from this source</strong> to proceed.</span>
+                  </div>
+                </div>
               </div>
 
               {/* Secondary Option: Direct Standalone WebAPK */}

@@ -530,14 +530,14 @@ export default function App() {
       if (freshMeetings.length > 0) {
         addNotification({
           title: `Schedule Checked (${freshMeetings.length} meetings)`,
-          message: `You have ${freshMeetings.length} meeting(s) on your Google Calendar today.`,
+          message: `You have ${freshMeetings.length} meeting(s) today in Philippine Standard Time (PHT).`,
           type: 'meeting',
           meetingLink: freshMeetings[0].hangoutLink,
         });
       } else {
         addNotification({
-          title: 'Schedule All Clear',
-          message: 'No Google Calendar meetings found for today.',
+          title: 'Schedule All Clear (Manila Time)',
+          message: 'No Google Calendar meetings found for today in Philippine Standard Time (PHT).',
           type: 'info',
         });
       }
@@ -1544,7 +1544,7 @@ export default function App() {
         onCreateTaskFromMeeting={handleConvertEventToTask}
         todayTasks={allTasksCombined.filter((t) => {
           if (!t.due) return false;
-          return t.due.split('T')[0] === new Date().toISOString().split('T')[0];
+          return getManilaDateString(t.due) === getManilaTodayDateString();
         })}
       />
 
