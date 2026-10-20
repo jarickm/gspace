@@ -196,13 +196,14 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenMeetingChecker && (
           <button
             onClick={onOpenMeetingChecker}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold shadow-2xs transition-all active:scale-95"
-            title="Check today's Google Calendar meetings & join Google Meet calls"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50/90 hover:bg-amber-100 text-amber-900 text-xs font-semibold shadow-2xs transition-all active:scale-95 cursor-pointer"
+            title="Check today's Google Calendar meetings (Philippine Standard Time, Manila GMT+8)"
           >
-            <Video className="w-3.5 h-3.5 text-blue-600" />
+            <Video className="w-3.5 h-3.5 text-amber-600" />
             <span className="hidden md:inline">Check Meetings</span>
+            <span className="hidden xl:inline text-[10px] text-amber-800 font-bold bg-amber-200/60 px-1 rounded">PHT</span>
             {todayMeetingsCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-600 text-white font-bold">
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-600 text-white font-bold">
                 {todayMeetingsCount}
               </span>
             )}

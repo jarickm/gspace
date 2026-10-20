@@ -16,6 +16,13 @@ import {
   ArrowRight,
   ListTodo,
 } from 'lucide-react';
+import {
+  MANILA_TIMEZONE,
+  MANILA_LABEL,
+  getManilaTodayDateString,
+  getManilaDateString,
+  getManilaTimeString24,
+} from '../utils/timezone';
 
 interface CalendarEventModalProps {
   isOpen: boolean;
@@ -62,6 +69,7 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
   const [addGoogleMeet, setAddGoogleMeet] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,27 +86,25 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
 
       if (startDateTime) {
         setIsAllDay(false);
-        const [d, t] = startDateTime.split('T');
-        setDate(d);
-        if (t) setStartTime(t.slice(0, 5));
+        setDate(getManilaDateString(startDateTime));
+        setStartTime(getManilaTimeString24(startDateTime));
       } else if (startDate) {
         setIsAllDay(true);
         setDate(startDate);
       } else {
-        setDate(initialDate || new Date().toISOString().split('T')[0]);
+        setDate(initialDate || getManilaTodayDateString());
       }
 
       const endDateTime = event.end?.dateTime;
       if (endDateTime) {
-        const [, t] = endDateTime.split('T');
-        if (t) setEndTime(t.slice(0, 5));
+        setEndTime(getManilaTimeString24(endDateTime));
       }
 
       setAddGoogleMeet(!!event.hangoutLink);
     } else {
       setSummary('');
       setDescription('');
-      setDate(initialDate || new Date().toISOString().split('T')[0]);
+      setDate(initialDate || getManilaTodayDateString());
       setStartTime('09:00');
       setEndTime('10:00');
       setIsAllDay(false);
@@ -106,6 +112,7 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
       setAttendees([]);
       setAddGoogleMeet(true);
     }
+    setConfirmDelete(false);
     setError(null);
   }, [event, initialDate, isOpen]);
 
@@ -169,7 +176,6 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
 
   const handleDelete = async () => {
     if (!event?.id || !onDelete) return;
-    if (!window.confirm('Delete this event from Google Calendar?')) return;
 
     try {
       setIsDeleting(true);
@@ -192,11 +198,16 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
               <CalendarIcon className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="font-bold text-base sm:text-lg">
-                {isEditing ? 'Edit Google Calendar Meeting' : 'Schedule New Meeting / Event'}
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-base sm:text-lg">
+                  {isEditing ? 'Edit Google Calendar Meeting' : 'Schedule New Meeting / Event'}
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white border border-white/30">
+                  🇵🇭 Manila (GMT+8)
+                </span>
+              </div>
               <p className="text-xs text-amber-100">
-                Directly syncs with Google Calendar & Google Workspace
+                Directly syncs with Google Calendar in Philippine Standard Time
               </p>
             </div>
           </div>
@@ -262,26 +273,32 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
             {!isAllDay && (
               <>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" /> Start Time
+                  <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" /> Start Time
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1 rounded">PHT (GMT+8)</span>
                   </label>
                   <input
                     type="time"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" /> End Time
+                  <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" /> End Time
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1 rounded">PHT (GMT+8)</span>
                   </label>
                   <input
                     type="time"
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
                   />
                 </div>
               </>
@@ -454,15 +471,35 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
           <div>
             {isEditing && onDelete && (
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={isDeleting || isSaving}
-                className="px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 disabled:opacity-50"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                {isDeleting ? 'Deleting...' : 'Delete Meeting'}
-              </button>
+              confirmDelete ? (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={isDeleting || isSaving}
+                    className="px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {isDeleting ? 'Deleting...' : 'Confirm Delete?'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(false)}
+                    className="px-2 py-1 text-xs text-slate-500 hover:text-slate-800 rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={isDeleting || isSaving}
+                  className="px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete Meeting
+                </button>
+              )
             )}
           </div>
 

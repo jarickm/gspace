@@ -1,4 +1,9 @@
 import type { GoogleCalendarEvent, CalendarMeeting } from '../types/gqueues';
+import {
+  MANILA_TIMEZONE,
+  getManilaDayBounds,
+  getManilaTodayDateString,
+} from '../utils/timezone';
 
 export interface CalendarEventAttendee {
   email: string;
@@ -9,6 +14,8 @@ export interface CreateCalendarEventParams {
   summary: string;
   description?: string;
   dueDate?: string; // YYYY-MM-DD or ISO
+  startTime?: string;
+  endTime?: string;
   timeEstimate?: string;
   location?: string;
   attendees?: CalendarEventAttendee[];
@@ -20,6 +27,8 @@ export interface UpdateCalendarEventParams {
   summary?: string;
   description?: string;
   dueDate?: string;
+  startTime?: string;
+  endTime?: string;
   timeEstimate?: string;
   location?: string;
   attendees?: CalendarEventAttendee[];
@@ -34,7 +43,8 @@ export async function fetchCalendarEvents(
   const params = new URLSearchParams({
     singleEvents: 'true',
     orderBy: 'startTime',
-    maxResults: '100',
+    timeZone: MANILA_TIMEZONE,
+    maxResults: '200',
   });
 
   if (timeMin) params.set('timeMin', timeMin);
@@ -72,19 +82,19 @@ export async function fetchCalendarEvents(
 }
 
 /**
- * Check if the user has meetings today in Google Workspace Calendar
+ * Check if the user has meetings today in Google Workspace Calendar (Asia/Manila time)
  * Returns enriched meetings with Google Meet video links, status, and live countdowns
  */
 export async function fetchTodayMeetings(accessToken: string): Promise<CalendarMeeting[]> {
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  // Compute exact start & end of day in Philippines (Manila) Time (UTC+8)
+  const { timeMin, timeMax } = getManilaDayBounds();
 
   const params = new URLSearchParams({
     singleEvents: 'true',
     orderBy: 'startTime',
-    timeMin: startOfDay.toISOString(),
-    timeMax: endOfDay.toISOString(),
+    timeMin,
+    timeMax,
+    timeZone: MANILA_TIMEZONE,
     maxResults: '50',
   });
 
@@ -102,7 +112,7 @@ export async function fetchTodayMeetings(accessToken: string): Promise<CalendarM
 
   const data = await res.json();
   const items = data.items || [];
-  const currentTimeMs = now.getTime();
+  const currentTimeMs = Date.now();
 
   return items
     .filter((e: any) => e.status !== 'cancelled')
@@ -110,8 +120,8 @@ export async function fetchTodayMeetings(accessToken: string): Promise<CalendarM
       let isLiveNow = false;
       let startsInMinutes: number | undefined = undefined;
 
-      const startTimeStr = e.start?.dateTime || (e.start?.date ? `${e.start.date}T00:00:00` : null);
-      const endTimeStr = e.end?.dateTime || (e.end?.date ? `${e.end.date}T23:59:59` : null);
+      const startTimeStr = e.start?.dateTime || (e.start?.date ? `${e.start.date}T00:00:00+08:00` : null);
+      const endTimeStr = e.end?.dateTime || (e.end?.date ? `${e.end.date}T23:59:59+08:00` : null);
 
       if (startTimeStr && endTimeStr) {
         const startMs = new Date(startTimeStr).getTime();
@@ -121,6 +131,8 @@ export async function fetchTodayMeetings(accessToken: string): Promise<CalendarM
           isLiveNow = true;
           startsInMinutes = 0;
         } else if (startMs > currentTimeMs) {
+          startsInMinutes = Math.round((startMs - currentTimeMs) / (60 * 1000));
+        } else {
           startsInMinutes = Math.round((startMs - currentTimeMs) / (60 * 1000));
         }
       }
@@ -152,21 +164,29 @@ export async function createCalendarEvent(
   accessToken: string,
   params: CreateCalendarEventParams
 ): Promise<GoogleCalendarEvent> {
-  const dateStr = params.dueDate || new Date().toISOString().split('T')[0];
-  const isDateTime = dateStr.includes('T');
+  const rawDate = params.dueDate || getManilaTodayDateString();
+  const dateOnly = rawDate.split('T')[0];
 
-  const start = isDateTime
-    ? { dateTime: dateStr }
-    : { date: dateStr.split('T')[0] };
+  let start: { dateTime?: string; date?: string; timeZone?: string };
+  let end: { dateTime?: string; date?: string; timeZone?: string };
 
-  // Calculate default end time: 1 hour later if datetime, or same day if date
-  let end: { dateTime?: string; date?: string };
-  if (isDateTime) {
-    const startDate = new Date(dateStr);
+  if (params.startTime) {
+    const startIso = `${dateOnly}T${params.startTime}:00+08:00`;
+    const endIso = params.endTime
+      ? `${dateOnly}T${params.endTime}:00+08:00`
+      : `${dateOnly}T${params.startTime}:00+08:00`;
+    start = { dateTime: startIso, timeZone: MANILA_TIMEZONE };
+    end = { dateTime: endIso, timeZone: MANILA_TIMEZONE };
+  } else if (rawDate.includes('T')) {
+    const hasOffset = rawDate.includes('+') || rawDate.endsWith('Z');
+    const startIso = hasOffset ? rawDate : `${rawDate}+08:00`;
+    const startDate = new Date(startIso);
     const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-    end = { dateTime: endDate.toISOString() };
+    start = { dateTime: startIso, timeZone: MANILA_TIMEZONE };
+    end = { dateTime: endDate.toISOString(), timeZone: MANILA_TIMEZONE };
   } else {
-    end = { date: dateStr.split('T')[0] };
+    start = { date: dateOnly, timeZone: MANILA_TIMEZONE };
+    end = { date: dateOnly, timeZone: MANILA_TIMEZONE };
   }
 
   const payload: any = {
@@ -254,15 +274,29 @@ export async function updateCalendarEvent(
     payload.location = params.location;
   }
 
-  if (params.dueDate) {
+  if (params.startTime) {
+    const dateOnly = (params.dueDate || getManilaTodayDateString()).split('T')[0];
+    const startIso = `${dateOnly}T${params.startTime}:00+08:00`;
+    const endIso = params.endTime
+      ? `${dateOnly}T${params.endTime}:00+08:00`
+      : `${dateOnly}T${params.startTime}:00+08:00`;
+    payload.start = { dateTime: startIso, timeZone: MANILA_TIMEZONE };
+    payload.end = { dateTime: endIso, timeZone: MANILA_TIMEZONE };
+  } else if (params.dueDate) {
     const dateStr = params.dueDate;
     const isDateTime = dateStr.includes('T');
-    payload.start = isDateTime ? { dateTime: dateStr } : { date: dateStr.split('T')[0] };
     if (isDateTime) {
-      const startDate = new Date(dateStr);
-      payload.end = { dateTime: new Date(startDate.getTime() + 60 * 60 * 1000).toISOString() };
+      const hasOffset = dateStr.includes('+') || dateStr.endsWith('Z');
+      const startIso = hasOffset ? dateStr : `${dateStr}+08:00`;
+      const startDate = new Date(startIso);
+      payload.start = { dateTime: startIso, timeZone: MANILA_TIMEZONE };
+      payload.end = {
+        dateTime: new Date(startDate.getTime() + 60 * 60 * 1000).toISOString(),
+        timeZone: MANILA_TIMEZONE,
+      };
     } else {
-      payload.end = { date: dateStr.split('T')[0] };
+      payload.start = { date: dateStr.split('T')[0], timeZone: MANILA_TIMEZONE };
+      payload.end = { date: dateStr.split('T')[0], timeZone: MANILA_TIMEZONE };
     }
   }
 

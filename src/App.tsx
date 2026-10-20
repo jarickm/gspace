@@ -38,6 +38,10 @@ import {
 } from './services/calendarApi';
 import { fetchContacts } from './services/peopleApi';
 import type { CalendarMeeting, AppNotification } from './types/gqueues';
+import {
+  getManilaTodayDateString,
+  getManilaDateString,
+} from './utils/timezone';
 
 import { AuthScreen } from './components/AuthScreen';
 import { Header } from './components/Header';
@@ -352,12 +356,11 @@ export default function App() {
     return list;
   }, [allTasksCache]);
 
-  // Calculate Smart Queue counts
+  // Calculate Smart Queue counts (using Philippines Manila time)
   const smartCounts = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const sevenDaysLater = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split('T')[0];
+    const today = getManilaTodayDateString();
+    const nowMs = Date.now();
+    const sevenDaysLater = getManilaDateString(new Date(nowMs + 7 * 24 * 60 * 60 * 1000));
 
     let todayCount = 0;
     let overdueCount = 0;
@@ -370,7 +373,7 @@ export default function App() {
     for (const t of allTasksCombined) {
       if (t.status === 'completed') {
         completedCount++;
-        const finishedDate = (t.completed || t.completedAt || t.updated || '').split('T')[0];
+        const finishedDate = getManilaDateString(t.completed || t.completedAt || t.updated || '');
         if (finishedDate === today) {
           todayCompleted++;
         }
@@ -384,7 +387,7 @@ export default function App() {
       }
 
       if (t.due) {
-        const dueDate = t.due.split('T')[0];
+        const dueDate = getManilaDateString(t.due);
         if (dueDate === today) {
           todayCount++;
         } else if (dueDate < today) {
@@ -417,30 +420,28 @@ export default function App() {
     return Array.from(tagSet);
   }, [allTasksCombined]);
 
-  // Determine current active tasks to render
+  // Determine current active tasks to render (in Philippines Manila time)
   const tasksToRender = useMemo(() => {
     if (activeSmartQueue) {
-      const today = new Date().toISOString().split('T')[0];
-      const sevenDaysLater = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split('T')[0];
+      const today = getManilaTodayDateString();
+      const sevenDaysLater = getManilaDateString(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
 
       switch (activeSmartQueue) {
         case 'today':
           return allTasksCombined.filter(
-            (t) => t.status !== 'completed' && t.due && t.due.split('T')[0] === today
+            (t) => t.status !== 'completed' && t.due && getManilaDateString(t.due) === today
           );
         case 'overdue':
           return allTasksCombined.filter(
-            (t) => t.status !== 'completed' && t.due && t.due.split('T')[0] < today
+            (t) => t.status !== 'completed' && t.due && getManilaDateString(t.due) < today
           );
         case 'upcoming':
           return allTasksCombined.filter(
             (t) =>
               t.status !== 'completed' &&
               t.due &&
-              t.due.split('T')[0] >= today &&
-              t.due.split('T')[0] <= sevenDaysLater
+              getManilaDateString(t.due) >= today &&
+              getManilaDateString(t.due) <= sevenDaysLater
           );
         case 'starred':
           return allTasksCombined.filter(
