@@ -15,7 +15,9 @@ import {
   Sparkles,
   ArrowRight,
   ListTodo,
+  Loader2,
 } from 'lucide-react';
+import { aiGenerateMeetingPrep } from '../services/aiApi';
 import {
   MANILA_TIMEZONE,
   MANILA_LABEL,
@@ -71,6 +73,33 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+
+  const handleAIGenerateAgenda = async () => {
+    if (!summary.trim() || isGeneratingAI) return;
+    setIsGeneratingAI(true);
+    try {
+      const res = await aiGenerateMeetingPrep(summary, description, attendees, location);
+      let newDesc = '';
+      if (res.outcomeGoal) {
+        newDesc += `🎯 Objective: ${res.outcomeGoal}\n\n`;
+      }
+      if (res.agenda && res.agenda.length > 0) {
+        newDesc += `📋 Agenda:\n${res.agenda.map((a) => `• ${a}`).join('\n')}\n\n`;
+      }
+      if (res.discussionQuestions && res.discussionQuestions.length > 0) {
+        newDesc += `❓ Key Questions:\n${res.discussionQuestions.map((q) => `• ${q}`).join('\n')}\n\n`;
+      }
+      if (description && description.trim()) {
+        newDesc += `Notes:\n${description}`;
+      }
+      setDescription(newDesc.trim());
+    } catch (err: any) {
+      console.error('AI Meeting Prep error:', err);
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
 
   useEffect(() => {
     if (event) {
@@ -432,9 +461,26 @@ export const CalendarEventModal: React.FC<CalendarEventModalProps> = ({
 
           {/* Description / Agenda */}
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1 flex items-center gap-1.5">
-              <AlignLeft className="w-3.5 h-3.5 text-slate-400" /> Agenda / Description
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                <AlignLeft className="w-3.5 h-3.5 text-slate-400" /> Agenda & Description
+              </label>
+
+              <button
+                type="button"
+                onClick={handleAIGenerateAgenda}
+                disabled={isGeneratingAI || !summary.trim()}
+                className="px-2.5 py-1 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                title="Use Gemini AI to draft an agenda for this meeting"
+              >
+                {isGeneratingAI ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3 h-3 text-amber-200" />
+                )}
+                <span>{isGeneratingAI ? 'Drafting...' : '✨ AI Agenda'}</span>
+              </button>
+            </div>
             <textarea
               rows={3}
               value={description}

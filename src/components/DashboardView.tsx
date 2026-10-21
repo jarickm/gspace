@@ -32,7 +32,11 @@ import {
   Filter,
   Link2,
   ShieldAlert,
+  Loader2,
+  Bot,
+  X,
 } from 'lucide-react';
+import { aiGenerateDailyBriefing, type DailyBriefingResult } from '../services/aiApi';
 
 interface DashboardViewProps {
   tasks: GQueueTask[];
@@ -53,6 +57,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [queueFilter, setQueueFilter] = useState<string>('all');
+  const [briefing, setBriefing] = useState<DailyBriefingResult | null>(null);
+  const [isLoadingBriefing, setIsLoadingBriefing] = useState(false);
+
+  const handleGenerateBriefing = async () => {
+    setIsLoadingBriefing(true);
+    try {
+      const res = await aiGenerateDailyBriefing(allTasks, []);
+      setBriefing(res);
+    } catch (err) {
+      console.error('Failed to generate daily briefing:', err);
+    } finally {
+      setIsLoadingBriefing(false);
+    }
+  };
 
   // Filter tasks based on selections
   const filteredTasks = useMemo(() => {
@@ -297,6 +315,75 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* AI Executive Daily Briefing Card */}
+      <div className="p-4 sm:p-5 bg-gradient-to-r from-blue-900 via-indigo-900 to-purple-950 text-white rounded-2xl shadow-sm border border-indigo-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-md flex items-center justify-center text-amber-300">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm sm:text-base text-white">
+                GQueues AI Executive Daily Briefing
+              </h3>
+              <p className="text-xs text-blue-200/80">
+                AI synthesis of your workload, deadlines, and schedule (Manila UTC+8)
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGenerateBriefing}
+            disabled={isLoadingBriefing}
+            className="px-3.5 py-1.5 bg-white hover:bg-blue-50 text-indigo-950 rounded-xl text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1.5 self-start sm:self-auto cursor-pointer disabled:opacity-50"
+          >
+            {isLoadingBriefing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+            )}
+            <span>{isLoadingBriefing ? 'Synthesizing...' : briefing ? 'Regenerate Briefing' : '✨ Generate AI Briefing'}</span>
+          </button>
+        </div>
+
+        {briefing && (
+          <div className="p-4 bg-white/10 backdrop-blur-md rounded-xl border border-white/10 space-y-3 text-xs leading-relaxed animate-in fade-in">
+            <div className="flex items-start justify-between gap-2">
+              <h4 className="font-extrabold text-sm text-amber-300">{briefing.headline}</h4>
+              <button
+                type="button"
+                onClick={() => setBriefing(null)}
+                className="text-white/60 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-blue-100">{briefing.summary}</p>
+
+            {briefing.topPriorities && briefing.topPriorities.length > 0 && (
+              <div className="space-y-1 pt-1 border-t border-white/10">
+                <span className="font-bold text-[11px] uppercase tracking-wider text-amber-200 block">
+                  Top Recommended Focus Areas:
+                </span>
+                {briefing.topPriorities.map((item, idx) => (
+                  <div key={idx} className="flex items-start gap-1.5 text-white/90">
+                    <span className="text-amber-400 font-bold">{idx + 1}.</span>
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {briefing.motivationalTip && (
+              <p className="text-[11px] italic text-blue-200/90 pt-1">
+                💡 <strong>Tip:</strong> {briefing.motivationalTip}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* KPI Summary Cards */}

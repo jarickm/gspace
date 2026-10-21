@@ -6,6 +6,7 @@ import type {
   RecurringSchedule,
   TimeLogEntry,
 } from '../types/gqueues';
+import { notifySessionExpired } from './firebase';
 
 const META_SEPARATOR = '\n\n--- [gqueues-meta] ---\n';
 
@@ -217,6 +218,9 @@ export async function fetchTaskLists(accessToken: string): Promise<QueueList[]> 
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      notifySessionExpired();
+    }
     const errorBody = await res.text();
     throw new Error(`Failed to fetch task lists (${res.status}): ${errorBody}`);
   }
@@ -318,6 +322,9 @@ export async function fetchTasks(accessToken: string, listId: string): Promise<G
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      notifySessionExpired();
+    }
     const error = await res.text();
     throw new Error(`Failed to fetch tasks for list ${listId} (${res.status}): ${error}`);
   }

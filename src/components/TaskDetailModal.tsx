@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { saveCustomTeammate, searchDirectoryPeople } from '../services/peopleApi';
 import { formatSecondsToHuman } from '../services/tasksApi';
+import { aiBreakdownTask, aiSuggestTaskDetails } from '../services/aiApi';
 
 interface TaskDetailModalProps {
   task: GQueueTask | null;
@@ -138,6 +139,68 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
   const [isSaving, setIsSaving] = useState(false);
   const [isCalendarSyncing, setIsCalendarSyncing] = useState(false);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [aiNotification, setAiNotification] = useState<string | null>(null);
+
+  const handleAIBreakdown = async () => {
+    if (!title.trim() || isGeneratingAI) return;
+    setIsGeneratingAI(true);
+    setAiNotification(null);
+    try {
+      const res = await aiBreakdownTask(
+        title,
+        notes,
+        subtasks.map((s) => s.title)
+      );
+      if (res.subtasks && res.subtasks.length > 0) {
+        setSubtasks((prev) => [...prev, ...res.subtasks]);
+        if (res.suggestedTimeEstimate && !timeEstimate) {
+          setTimeEstimate(res.suggestedTimeEstimate);
+        }
+        if (res.suggestedPriority && priority === 'none') {
+          setPriority(res.suggestedPriority);
+        }
+        setAiNotification(`Added ${res.subtasks.length} AI-generated subtask steps!`);
+        setTimeout(() => setAiNotification(null), 3500);
+      }
+    } catch (err: any) {
+      console.error('AI breakdown error:', err);
+      setAiNotification(`AI error: ${err.message || 'Failed to generate steps'}`);
+      setTimeout(() => setAiNotification(null), 4000);
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
+
+  const handleAISuggestDetails = async () => {
+    if (!title.trim() || isGeneratingAI) return;
+    setIsGeneratingAI(true);
+    setAiNotification(null);
+    try {
+      const res = await aiSuggestTaskDetails(title, notes, due);
+      if (res.priority && priority === 'none') {
+        setPriority(res.priority);
+      }
+      if (res.timeEstimate && !timeEstimate) {
+        setTimeEstimate(res.timeEstimate);
+      }
+      if (res.tags && res.tags.length > 0) {
+        const unique = Array.from(new Set([...tags, ...res.tags]));
+        setTags(unique);
+      }
+      if (res.suggestedNotes && (!notes || notes.trim() === '')) {
+        setNotes(res.suggestedNotes);
+      }
+      setAiNotification('Applied AI-recommended priority, estimate & tags!');
+      setTimeout(() => setAiNotification(null), 3500);
+    } catch (err: any) {
+      console.error('AI suggest error:', err);
+      setAiNotification(`AI error: ${err.message || 'Failed to suggest details'}`);
+      setTimeout(() => setAiNotification(null), 4000);
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
 
   // Assignee picker states
   const [isAssigneePickerOpen, setIsAssigneePickerOpen] = useState(false);
@@ -477,15 +540,46 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
           )}
 
-          {/* Title */}
-          <div>
+          {/* AI Banner / Notification */}
+          {aiNotification && (
+            <div className="p-2.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900 animate-in fade-in">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                {aiNotification}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAiNotification(null)}
+                className="text-blue-400 hover:text-blue-700"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Title and AI Suggest */}
+          <div className="flex items-center justify-between gap-3">
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Task summary / title"
-              className="w-full text-lg md:text-xl font-bold text-slate-900 border-none outline-none focus:ring-0 placeholder:text-slate-300 p-0"
+              className="flex-1 text-lg md:text-xl font-bold text-slate-900 border-none outline-none focus:ring-0 placeholder:text-slate-300 p-0"
             />
+            <button
+              type="button"
+              onClick={handleAISuggestDetails}
+              disabled={isGeneratingAI || !title.trim()}
+              className="px-2.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex-shrink-0"
+              title="Use Gemini AI to analyze task and recommend priority, time estimate, and tags"
+            >
+              {isGeneratingAI ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              )}
+              <span>{isGeneratingAI ? 'Thinking...' : '✨ AI Suggest'}</span>
+            </button>
           </div>
 
           {/* Properties Grid: Workflow Stage, Priority, Due Date, Time Estimate, Recurring */}
@@ -874,10 +968,27 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
           {/* Subtasks Checklist */}
           <div>
-            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-              <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
-              Subtasks Checklist ({subtasks.filter((s) => s.completed).length}/{subtasks.length})
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                Subtasks Checklist ({subtasks.filter((s) => s.completed).length}/{subtasks.length})
+              </label>
+
+              <button
+                type="button"
+                onClick={handleAIBreakdown}
+                disabled={isGeneratingAI || !title.trim()}
+                className="px-2.5 py-1 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                title="Use Gemini AI to automatically generate actionable subtask steps"
+              >
+                {isGeneratingAI ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                )}
+                <span>{isGeneratingAI ? 'Generating...' : '✨ AI Breakdown'}</span>
+              </button>
+            </div>
 
             <div className="space-y-1.5 mb-3">
               {subtasks.map((sub) => (

@@ -5,6 +5,8 @@ import {
   googleSignIn,
   logout,
   auth,
+  isTokenExpired,
+  onSessionExpired,
 } from './services/firebase';
 import type {
   QueueList,
@@ -63,6 +65,7 @@ import { ExportModal } from './components/ExportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { AIAssistantModal } from './components/AIAssistantModal';
 
 export default function App() {
   // Authentication states
@@ -72,15 +75,76 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // App data states
-  const [queues, setQueues] = useState<QueueList[]>([]);
-  const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
+  // App data states (hydrated from localStorage cache for instant zero-delay render)
+  const [queues, setQueues] = useState<QueueList[]>(() => {
+    try {
+      const saved = localStorage.getItem('gqueues_local_queues');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [activeQueueId, setActiveQueueId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('gqueues_local_active_queue_id') || null;
+    } catch {
+      return null;
+    }
+  });
+
   const [activeSmartQueue, setActiveSmartQueue] = useState<SmartQueueType | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<GQueueTask[]>([]);
-  const [allTasksCache, setAllTasksCache] = useState<Record<string, GQueueTask[]>>({});
-  const [contacts, setContacts] = useState<GoogleContact[]>([]);
-  const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
+
+  const [allTasksCache, setAllTasksCache] = useState<Record<string, GQueueTask[]>>(() => {
+    try {
+      const saved = localStorage.getItem('gqueues_local_tasks_cache');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [tasks, setTasks] = useState<GQueueTask[]>(() => {
+    try {
+      const savedQ = localStorage.getItem('gqueues_local_active_queue_id');
+      const savedTasks = localStorage.getItem('gqueues_local_tasks_cache');
+      if (savedQ && savedTasks) {
+        const parsed = JSON.parse(savedTasks);
+        if (parsed[savedQ]) return parsed[savedQ];
+      }
+    } catch {}
+    return [];
+  });
+
+  const [contacts, setContacts] = useState<GoogleContact[]>(() => {
+    try {
+      const saved = localStorage.getItem('gqueues_local_contacts');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem('gqueues_local_calendar');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [lastSyncTime, setLastSyncTime] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem('gqueues_last_sync_time');
+      return saved ? Number(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [isSessionExpired, setIsSessionExpired] = useState(false);
 
   // Meetings & Notifications states
   const [isMeetingCheckerOpen, setIsMeetingCheckerOpen] = useState(false);
@@ -99,6 +163,7 @@ export default function App() {
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
 
   // Modals state
   const [selectedTaskForDetail, setSelectedTaskForDetail] = useState<GQueueTask | null>(null);
@@ -140,6 +205,9 @@ export default function App() {
         setUser(currentUser);
         setToken(accessToken);
         setIsAuthChecking(false);
+        if (isTokenExpired()) {
+          setIsSessionExpired(true);
+        }
       },
       () => {
         setUser(null);
@@ -148,7 +216,14 @@ export default function App() {
       }
     );
 
-    return () => unsubscribe();
+    const unsubSession = onSessionExpired(() => {
+      setIsSessionExpired(true);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubSession();
+    };
   }, []);
 
   // Handle Google Workspace Sign-In
@@ -160,6 +235,7 @@ export default function App() {
       if (res) {
         setUser(res.user as User);
         setToken(res.accessToken);
+        setIsSessionExpired(false);
       }
     } catch (err: any) {
       if (
@@ -180,6 +256,35 @@ export default function App() {
     }
   };
 
+  // Reconnect Google Workspace Session (1-Click session refresh without signing out)
+  const handleReconnect = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      const res = await googleSignIn();
+      if (res?.accessToken) {
+        setUser(res.user as User);
+        setToken(res.accessToken);
+        setIsSessionExpired(false);
+        addNotification({
+          title: 'Workspace Reconnected',
+          message: 'Your Google Workspace connection is active. Refreshing records...',
+          type: 'success',
+        });
+        loadInitialWorkspaceData(res.accessToken);
+      }
+    } catch (err: any) {
+      console.error('Reconnect failed:', err);
+      addNotification({
+        title: 'Reconnect Error',
+        message: err.message || 'Please sign in again to refresh your token.',
+        type: 'warning',
+      });
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const handleSignOut = async () => {
     await logout();
     setUser(null);
@@ -189,40 +294,77 @@ export default function App() {
     setAllTasksCache({});
     setContacts([]);
     setCalendarEvents([]);
+    setIsSessionExpired(false);
+    try {
+      localStorage.removeItem('gqueues_local_queues');
+      localStorage.removeItem('gqueues_local_active_queue_id');
+      localStorage.removeItem('gqueues_local_tasks_cache');
+      localStorage.removeItem('gqueues_local_calendar');
+      localStorage.removeItem('gqueues_local_contacts');
+      localStorage.removeItem('gqueues_last_sync_time');
+    } catch {}
   };
 
-  // Load Queues, Contacts, and Calendar events from Google APIs
+  // Load Queues, Contacts, and Calendar events from Google APIs with localStorage caching
   const loadInitialWorkspaceData = useCallback(async (accessToken: string) => {
     setIsSyncing(true);
     try {
       // 1. Fetch Task Lists (Queues)
       let fetchedQueues = await fetchTaskLists(accessToken);
       if (fetchedQueues.length === 0) {
-        // Create an initial queue if user has no Google Tasks lists yet
         const defaultQ = await createTaskList(accessToken, 'Work Projects', 'Work');
         fetchedQueues = [defaultQ];
       }
 
       setQueues(fetchedQueues);
-      const initialQueue = fetchedQueues[0];
-      setActiveQueueId(initialQueue.id);
+      try {
+        localStorage.setItem('gqueues_local_queues', JSON.stringify(fetchedQueues));
+      } catch {}
+
+      const targetQueueId =
+        activeQueueId && fetchedQueues.some((q) => q.id === activeQueueId)
+          ? activeQueueId
+          : fetchedQueues[0].id;
+
+      setActiveQueueId(targetQueueId);
+      try {
+        localStorage.setItem('gqueues_local_active_queue_id', targetQueueId);
+      } catch {}
 
       // 2. Fetch Tasks for the active queue
-      const initialTasks = await fetchTasks(accessToken, initialQueue.id);
+      const initialTasks = await fetchTasks(accessToken, targetQueueId);
       setTasks(initialTasks);
-      setAllTasksCache((prev) => ({ ...prev, [initialQueue.id]: initialTasks }));
+      setAllTasksCache((prev) => {
+        const updated = { ...prev, [targetQueueId]: initialTasks };
+        try {
+          localStorage.setItem('gqueues_local_tasks_cache', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
 
       // 3. Fetch Google Contacts & Workspace Organization Directory (in background)
       const userEmail = auth.currentUser?.email || user?.email || '';
       const domain = userEmail.includes('@') ? userEmail.split('@')[1] : 'coolaireconsolidated.com';
-      fetchContacts(accessToken, domain).then(setContacts).catch(console.warn);
+      fetchContacts(accessToken, domain)
+        .then((c) => {
+          setContacts(c);
+          try {
+            localStorage.setItem('gqueues_local_contacts', JSON.stringify(c));
+          } catch {}
+        })
+        .catch(console.warn);
 
       // 4. Fetch Google Calendar events & today meetings (in background)
       const now = new Date();
       const pastMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const nextMonth = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
       fetchCalendarEvents(accessToken, pastMonth, nextMonth)
-        .then(setCalendarEvents)
+        .then((evts) => {
+          setCalendarEvents(evts);
+          try {
+            localStorage.setItem('gqueues_local_calendar', JSON.stringify(evts));
+          } catch {}
+        })
         .catch(console.warn);
 
       fetchTodayMeetings(accessToken)
@@ -231,26 +373,78 @@ export default function App() {
 
       // 5. Preload tasks from other queues for Smart Queues calculation
       for (const q of fetchedQueues) {
-        if (q.id !== initialQueue.id) {
+        if (q.id !== targetQueueId) {
           fetchTasks(accessToken, q.id)
-            .then((tasks) => {
-              setAllTasksCache((prev) => ({ ...prev, [q.id]: tasks }));
+            .then((otherTasks) => {
+              setAllTasksCache((prev) => {
+                const updated = { ...prev, [q.id]: otherTasks };
+                try {
+                  localStorage.setItem('gqueues_local_tasks_cache', JSON.stringify(updated));
+                } catch {}
+                return updated;
+              });
             })
             .catch(console.warn);
         }
       }
+
+      setLastSyncTime(Date.now());
+      try {
+        localStorage.setItem('gqueues_last_sync_time', String(Date.now()));
+      } catch {}
+      setIsSessionExpired(false);
     } catch (err: any) {
       console.error('Failed to load Google Workspace data:', err);
+      if (err?.message?.includes('401') || isTokenExpired()) {
+        setIsSessionExpired(true);
+      }
     } finally {
       setIsSyncing(false);
     }
-  }, []);
+  }, [activeQueueId, user?.email]);
 
   // Trigger loading when token is set
   useEffect(() => {
     if (token) {
-      loadInitialWorkspaceData(token);
+      if (isTokenExpired()) {
+        setIsSessionExpired(true);
+      } else {
+        loadInitialWorkspaceData(token);
+      }
     }
+  }, [token, loadInitialWorkspaceData]);
+
+  // Foreground re-validation & auto-refresh on focus or visibilitychange
+  useEffect(() => {
+    const handleRevalidate = () => {
+      if (document.visibilityState === 'visible' && token) {
+        if (isTokenExpired()) {
+          setIsSessionExpired(true);
+        } else {
+          loadInitialWorkspaceData(token);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleRevalidate);
+    window.addEventListener('focus', handleRevalidate);
+
+    // Auto-refresh every 2 minutes
+    const interval = setInterval(() => {
+      if (token && document.visibilityState === 'visible') {
+        if (isTokenExpired()) {
+          setIsSessionExpired(true);
+        } else {
+          loadInitialWorkspaceData(token);
+        }
+      }
+    }, 120000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleRevalidate);
+      window.removeEventListener('focus', handleRevalidate);
+      clearInterval(interval);
+    };
   }, [token, loadInitialWorkspaceData]);
 
   // Global Keyboard Shortcuts
@@ -464,7 +658,16 @@ export default function App() {
   // Refresh handler
   const handleRefresh = async () => {
     if (!token) return;
+    if (isTokenExpired()) {
+      setIsSessionExpired(true);
+      return;
+    }
     await loadInitialWorkspaceData(token);
+    addNotification({
+      title: 'Workspace Refreshed',
+      message: 'All tasks, queues, and calendar events are up to date.',
+      type: 'success',
+    });
   };
 
   // --- Task CRUD operations ---
@@ -1282,6 +1485,10 @@ export default function App() {
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
         onOpenMeetingChecker={handleCheckMeetings}
+        onOpenAIModal={() => setIsAIModalOpen(true)}
+        isSessionExpired={isSessionExpired}
+        onReconnect={handleReconnect}
+        lastSyncTime={lastSyncTime}
       />
 
       {/* Main Layout Area */}
@@ -1568,6 +1775,42 @@ export default function App() {
         isDestructive={confirmModalConfig.isDestructive}
         onConfirm={confirmModalConfig.onConfirm}
         onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* GQueues AI Companion Modal */}
+      <AIAssistantModal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        tasks={allTasksCombined}
+        queues={queues}
+        currentQueue={currentQueue}
+        todayMeetings={todayMeetings}
+        onQuickAddTask={(title, prio, due) => handleQuickAddTask(title, due, prio as any)}
+        onAddTaskWithDetails={async (taskData) => {
+          const targetQueueId = activeQueueId || queues[0]?.id;
+          if (!token || !targetQueueId) return;
+          try {
+            const created = await createTask(token, targetQueueId, {
+              title: taskData.title || 'New Task',
+              due: taskData.due,
+              priority: taskData.priority,
+              notes: taskData.notes,
+              timeEstimate: taskData.timeEstimate,
+            });
+            setTasks((prev) => [created, ...prev]);
+            setAllTasksCache((prev) => ({
+              ...prev,
+              [targetQueueId]: [created, ...(prev[targetQueueId] || [])],
+            }));
+            addNotification({
+              title: 'Task Created via AI',
+              message: `Created "${taskData.title}" in ${currentQueue?.title || 'your queue'}.`,
+              type: 'success',
+            });
+          } catch (err: any) {
+            console.error('Failed to create task via AI:', err);
+          }
+        }}
       />
     </div>
   );

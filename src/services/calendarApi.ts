@@ -1,4 +1,5 @@
 import type { GoogleCalendarEvent, CalendarMeeting } from '../types/gqueues';
+import { notifySessionExpired } from './firebase';
 import {
   MANILA_TIMEZONE,
   getManilaDayBounds,
@@ -58,6 +59,9 @@ export async function fetchCalendarEvents(
   );
 
   if (!res.ok) {
+    if (res.status === 401) {
+      notifySessionExpired();
+    }
     const error = await res.text();
     throw new Error(`Failed to fetch calendar events (${res.status}): ${error}`);
   }
@@ -106,6 +110,9 @@ export async function fetchTodayMeetings(accessToken: string): Promise<CalendarM
   );
 
   if (!res.ok) {
+    if (res.status === 401) {
+      notifySessionExpired();
+    }
     const errorBody = await res.text();
     throw new Error(`Failed to check today meetings (${res.status}): ${errorBody}`);
   }

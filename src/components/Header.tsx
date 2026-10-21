@@ -19,6 +19,8 @@ import {
   ShieldCheck,
   BarChart3,
   Video,
+  Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -40,6 +42,10 @@ interface HeaderProps {
   onOpenExportModal?: () => void;
   onOpenShortcutsModal?: () => void;
   onOpenMeetingChecker?: () => void;
+  onOpenAIModal?: () => void;
+  isSessionExpired?: boolean;
+  onReconnect?: () => void;
+  lastSyncTime?: number | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -61,11 +67,35 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenExportModal,
   onOpenShortcutsModal,
   onOpenMeetingChecker,
+  onOpenAIModal,
+  isSessionExpired = false,
+  onReconnect,
+  lastSyncTime,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200/90 px-3 md:px-6 flex items-center justify-between gap-2 sm:gap-3 sticky top-0 z-30 shadow-xs">
+    <>
+      {/* Session Expired Alert Banner */}
+      {isSessionExpired && onReconnect && (
+        <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white px-3 sm:px-6 py-2 text-xs font-medium flex items-center justify-between shadow-xs sticky top-0 z-40">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 animate-pulse text-amber-200" />
+            <span>
+              <strong>Google Workspace session expired:</strong> Tokens expire after 1 hour. You are currently viewing cached records.
+            </span>
+          </div>
+          <button
+            onClick={onReconnect}
+            className="px-3 py-1 bg-white text-amber-900 hover:bg-amber-50 rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0 ml-3 active:scale-95"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reconnect with 1-Click</span>
+          </button>
+        </div>
+      )}
+
+      <header className="h-16 bg-white border-b border-slate-200/90 px-3 md:px-6 flex items-center justify-between gap-2 sm:gap-3 sticky top-0 z-30 shadow-xs">
       {/* Left: Mobile hamburger + App Brand */}
       <div className="flex items-center gap-3">
         <button
@@ -229,6 +259,19 @@ export const Header: React.FC<HeaderProps> = ({
             title="Keyboard shortcuts (?)"
           >
             <Keyboard className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* GQueues AI Companion Button */}
+        {onOpenAIModal && (
+          <button
+            onClick={onOpenAIModal}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-indigo-300 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 text-indigo-900 text-xs font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+            title="Open GQueues AI Companion (Smart task breakdown, daily briefing, meeting prep)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+            <span className="hidden sm:inline">AI Companion</span>
+            <span className="sm:hidden">AI</span>
           </button>
         )}
 
@@ -413,5 +456,6 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
     </header>
-  );
+  </>
+);
 };

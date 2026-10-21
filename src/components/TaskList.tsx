@@ -35,6 +35,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { formatSecondsToHuman } from '../services/tasksApi';
+import { aiParseNaturalTask } from '../services/aiApi';
 
 interface TaskListProps {
   currentQueue: QueueList | null;
@@ -125,6 +126,23 @@ export const TaskList: React.FC<TaskListProps> = ({
       console.error(err);
     } finally {
       setIsSubmittingQuick(false);
+    }
+  };
+
+  const [isParsingAI, setIsParsingAI] = useState(false);
+
+  const handleAISmartAdd = async () => {
+    if (!quickTitle.trim() || isParsingAI) return;
+    setIsParsingAI(true);
+    try {
+      const parsed = await aiParseNaturalTask(quickTitle);
+      if (parsed.title) setQuickTitle(parsed.title);
+      if (parsed.dueDate) setQuickDue(parsed.dueDate);
+      if (parsed.priority && parsed.priority !== 'none') setQuickPriority(parsed.priority);
+    } catch (err) {
+      console.error('AI smart add parse failed:', err);
+    } finally {
+      setIsParsingAI(false);
     }
   };
 
@@ -495,6 +513,18 @@ export const TaskList: React.FC<TaskListProps> = ({
               <option value="medium">🔵 Medium</option>
               <option value="low">⚪ Low</option>
             </select>
+
+            {/* AI Smart Parse Button */}
+            <button
+              type="button"
+              onClick={handleAISmartAdd}
+              disabled={!quickTitle.trim() || isParsingAI}
+              className="px-2.5 py-1.5 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border border-indigo-200 text-indigo-900 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all active:scale-95 disabled:opacity-40 cursor-pointer"
+              title="Parse natural language with Gemini AI (e.g. 'Submit report next Friday urgent')"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <span>{isParsingAI ? 'Parsing...' : 'AI Parse'}</span>
+            </button>
 
             <button
               type="submit"
