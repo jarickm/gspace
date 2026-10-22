@@ -33,6 +33,8 @@ import {
   Flame,
   Link2,
   ShieldAlert,
+  Loader2,
+  X,
 } from 'lucide-react';
 import { formatSecondsToHuman } from '../services/tasksApi';
 import { aiParseNaturalTask } from '../services/aiApi';
@@ -130,17 +132,29 @@ export const TaskList: React.FC<TaskListProps> = ({
   };
 
   const [isParsingAI, setIsParsingAI] = useState(false);
+  const [aiParseToast, setAiParseToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const handleAISmartAdd = async () => {
     if (!quickTitle.trim() || isParsingAI) return;
     setIsParsingAI(true);
+    setAiParseToast(null);
     try {
       const parsed = await aiParseNaturalTask(quickTitle);
       if (parsed.title) setQuickTitle(parsed.title);
       if (parsed.dueDate) setQuickDue(parsed.dueDate);
       if (parsed.priority && parsed.priority !== 'none') setQuickPriority(parsed.priority);
-    } catch (err) {
+      setAiParseToast({
+        message: `✨ AI parsed: ${parsed.dueDate ? `Due ${parsed.dueDate}` : ''}${parsed.priority ? ` • ${parsed.priority.toUpperCase()}` : ''}`,
+        type: 'success',
+      });
+      setTimeout(() => setAiParseToast(null), 4000);
+    } catch (err: any) {
       console.error('AI smart add parse failed:', err);
+      setAiParseToast({
+        message: `⚠️ AI parse failed: ${err.message || 'Please check your connection and try again.'}`,
+        type: 'error',
+      });
+      setTimeout(() => setAiParseToast(null), 5000);
     } finally {
       setIsParsingAI(false);
     }
@@ -522,7 +536,11 @@ export const TaskList: React.FC<TaskListProps> = ({
               className="px-2.5 py-1.5 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border border-indigo-200 text-indigo-900 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all active:scale-95 disabled:opacity-40 cursor-pointer"
               title="Parse natural language with Gemini AI (e.g. 'Submit report next Friday urgent')"
             >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              {isParsingAI ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              )}
               <span>{isParsingAI ? 'Parsing...' : 'AI Parse'}</span>
             </button>
 
@@ -535,6 +553,25 @@ export const TaskList: React.FC<TaskListProps> = ({
             </button>
           </div>
         </form>
+
+        {/* AI Parse Feedback Toast */}
+        {aiParseToast && (
+          <div
+            className={`p-2.5 px-3.5 rounded-xl border text-xs font-medium flex items-center justify-between transition-all animate-in fade-in duration-150 ${
+              aiParseToast.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+            }`}
+          >
+            <span>{aiParseToast.message}</span>
+            <button
+              onClick={() => setAiParseToast(null)}
+              className="p-1 text-slate-400 hover:text-slate-600 rounded"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Active Tasks List */}
         <div className="space-y-2">

@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 dotenv.config();
 
@@ -26,24 +26,69 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Helper to call Gemini with resilient fallback between gemini-3.8-flash and gemini-3.1-flash-lite
-async function callGemini(prompt: string, systemInstruction?: string): Promise<string> {
+// Robust JSON extractor that handles raw JSON, markdown fences, or embedded JSON blocks
+function extractJson(text: string): any {
+  if (!text) throw new Error('Empty AI response');
+  try {
+    return JSON.parse(text.trim());
+  } catch {}
+
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {}
+  }
+
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    try {
+      return JSON.parse(text.slice(firstBracket, lastBracket + 1));
+    } catch {}
+  }
+
+  throw new Error(`Failed to parse AI JSON response: ${text.slice(0, 100)}...`);
+}
+
+// Helper to call Gemini with resilient fallback and low-latency ThinkingLevel.LOW
+async function callGemini(
+  prompt: string,
+  systemInstruction?: string,
+  isJson: boolean = true
+): Promise<string> {
   const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
 
   for (const model of modelsToTry) {
     try {
+      const config: any = {
+        temperature: 0.2,
+        thinkingConfig: {
+          thinkingLevel: ThinkingLevel.LOW,
+        },
+      };
+
+      if (systemInstruction) {
+        config.systemInstruction = systemInstruction;
+      }
+
+      if (isJson) {
+        config.responseMimeType = 'application/json';
+      }
+
       const response = await ai.models.generateContent({
         model,
         contents: prompt,
-        config: systemInstruction
-          ? {
-              systemInstruction,
-              temperature: 0.2,
-            }
-          : {
-              temperature: 0.2,
-            },
+        config,
       });
 
       if (response.text) {
@@ -52,11 +97,10 @@ async function callGemini(prompt: string, systemInstruction?: string): Promise<s
     } catch (err: any) {
       lastError = err;
       console.warn(`[Gemini API] Model ${model} encountered error:`, err?.message || err);
-      // If 503 or 429, continue to next model in list
+      // If 503, 429, or model busy, continue to next model in list
       if (err?.status === 503 || err?.status === 429 || err?.message?.includes('demand')) {
         continue;
       }
-      // If other error, still try fallback before giving up
     }
   }
 
@@ -104,12 +148,10 @@ Respond ONLY with valid JSON in this exact structure:
 
     const text = await callGemini(
       prompt,
-      'You are a JSON-only response engine. Return only pure JSON without markdown code fences or backticks.'
+      'You are a JSON-only response engine. Return only pure JSON.'
     );
 
-    // Clean JSON if code fences are present
-    const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleanText);
+    const parsed = extractJson(text);
 
     // Format subtasks with unique IDs
     const formattedSubtasks = (parsed.subtasks || []).map((s: any, idx: number) => ({
@@ -157,12 +199,10 @@ Return ONLY raw JSON with keys: "priority", "timeEstimate", "tags", "suggestedNo
 
     const text = await callGemini(
       prompt,
-      'You are a JSON-only response engine. Return only pure JSON without markdown code fences.'
+      'You are a JSON-only response engine. Return only pure JSON.'
     );
 
-    const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleanText);
-
+    const parsed = extractJson(text);
     res.json(parsed);
   } catch (error: any) {
     console.error('Error in /api/ai/suggest-details:', error);
@@ -203,12 +243,10 @@ Return ONLY valid JSON with keys: "headline", "summary", "topPriorities", "sched
 
     const text = await callGemini(
       prompt,
-      'You are a JSON-only response engine. Return only pure JSON without markdown code fences.'
+      'You are a JSON-only response engine. Return only pure JSON.'
     );
 
-    const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleanText);
-
+    const parsed = extractJson(text);
     res.json(parsed);
   } catch (error: any) {
     console.error('Error in /api/ai/daily-briefing:', error);
@@ -242,12 +280,10 @@ Return ONLY raw JSON with keys: "agenda", "prepTasks", "discussionQuestions", "o
 
     const text = await callGemini(
       prompt,
-      'You are a JSON-only response engine. Return only pure JSON without markdown code fences.'
+      'You are a JSON-only response engine. Return only pure JSON.'
     );
 
-    const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleanText);
-
+    const parsed = extractJson(text);
     res.json(parsed);
   } catch (error: any) {
     console.error('Error in /api/ai/meeting-prep:', error);
@@ -278,12 +314,10 @@ Return ONLY raw JSON with keys:
 
     const text = await callGemini(
       prompt,
-      'You are a JSON-only response engine. Return only pure JSON without markdown code fences.'
+      'You are a JSON-only response engine. Return only pure JSON.'
     );
 
-    const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleanText);
-
+    const parsed = extractJson(text);
     res.json(parsed);
   } catch (error: any) {
     console.error('Error in /api/ai/parse-natural:', error);
@@ -338,9 +372,7 @@ User's new message: "${message}"
 Generate a helpful response and return ONLY valid JSON with keys "reply" and "suggestedAction".`;
 
     const text = await callGemini(prompt, systemPrompt);
-    const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleanText);
-
+    const parsed = extractJson(text);
     res.json(parsed);
   } catch (error: any) {
     console.error('Error in /api/ai/chat:', error);

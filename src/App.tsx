@@ -7,6 +7,7 @@ import {
   auth,
   isTokenExpired,
   onSessionExpired,
+  refreshAccessTokenSilently,
 } from './services/firebase';
 import type {
   QueueList,
@@ -205,9 +206,6 @@ export default function App() {
         setUser(currentUser);
         setToken(accessToken);
         setIsAuthChecking(false);
-        if (isTokenExpired()) {
-          setIsSessionExpired(true);
-        }
       },
       () => {
         setUser(null);
@@ -396,18 +394,36 @@ export default function App() {
     } catch (err: any) {
       console.error('Failed to load Google Workspace data:', err);
       if (err?.message?.includes('401') || isTokenExpired()) {
-        setIsSessionExpired(true);
+        const fresh = await refreshAccessTokenSilently();
+        if (fresh) {
+          setToken(fresh);
+          setIsSessionExpired(false);
+          try {
+            await loadInitialWorkspaceData(fresh);
+            return;
+          } catch {}
+        } else {
+          setIsSessionExpired(true);
+        }
       }
     } finally {
       setIsSyncing(false);
     }
   }, [activeQueueId, user?.email]);
 
-  // Trigger loading when token is set
+  // Trigger loading when token is set or refreshed
   useEffect(() => {
     if (token) {
       if (isTokenExpired()) {
-        setIsSessionExpired(true);
+        refreshAccessTokenSilently().then((fresh) => {
+          if (fresh) {
+            setToken(fresh);
+            setIsSessionExpired(false);
+            loadInitialWorkspaceData(fresh);
+          } else {
+            setIsSessionExpired(true);
+          }
+        });
       } else {
         loadInitialWorkspaceData(token);
       }
@@ -416,12 +432,22 @@ export default function App() {
 
   // Foreground re-validation & auto-refresh on focus or visibilitychange
   useEffect(() => {
-    const handleRevalidate = () => {
-      if (document.visibilityState === 'visible' && token) {
-        if (isTokenExpired()) {
-          setIsSessionExpired(true);
-        } else {
-          loadInitialWorkspaceData(token);
+    const handleRevalidate = async () => {
+      if (document.visibilityState === 'visible') {
+        let activeToken = token;
+        if (!activeToken || isTokenExpired()) {
+          const fresh = await refreshAccessTokenSilently();
+          if (fresh) {
+            setToken(fresh);
+            setIsSessionExpired(false);
+            activeToken = fresh;
+          } else if (isTokenExpired()) {
+            setIsSessionExpired(true);
+            return;
+          }
+        }
+        if (activeToken) {
+          loadInitialWorkspaceData(activeToken);
         }
       }
     };
@@ -431,13 +457,7 @@ export default function App() {
 
     // Auto-refresh every 2 minutes
     const interval = setInterval(() => {
-      if (token && document.visibilityState === 'visible') {
-        if (isTokenExpired()) {
-          setIsSessionExpired(true);
-        } else {
-          loadInitialWorkspaceData(token);
-        }
-      }
+      handleRevalidate();
     }, 120000);
 
     return () => {
@@ -657,12 +677,21 @@ export default function App() {
 
   // Refresh handler
   const handleRefresh = async () => {
-    if (!token) return;
-    if (isTokenExpired()) {
-      setIsSessionExpired(true);
-      return;
+    setIsSyncing(true);
+    let activeToken = token;
+    if (!activeToken || isTokenExpired()) {
+      const fresh = await refreshAccessTokenSilently();
+      if (fresh) {
+        setToken(fresh);
+        setIsSessionExpired(false);
+        activeToken = fresh;
+      } else {
+        setIsSessionExpired(true);
+        setIsSyncing(false);
+        return;
+      }
     }
-    await loadInitialWorkspaceData(token);
+    await loadInitialWorkspaceData(activeToken);
     addNotification({
       title: 'Workspace Refreshed',
       message: 'All tasks, queues, and calendar events are up to date.',
