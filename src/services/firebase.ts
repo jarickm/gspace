@@ -132,7 +132,8 @@ export const clearSession = () => {
 // Google Identity Services (GIS) fallback for direct Google OAuth
 export const signInWithGIS = (
   clientId: string,
-  scopes: string[]
+  scopes: string[],
+  loginHint?: string
 ): Promise<{ user: Partial<User>; accessToken: string }> => {
   return new Promise((resolve, reject) => {
     const initClient = () => {
@@ -143,7 +144,7 @@ export const signInWithGIS = (
           return;
         }
 
-        const tokenClient = googleObj.accounts.oauth2.initTokenClient({
+        const clientConfig: any = {
           client_id: clientId,
           scope: scopes.join(' '),
           callback: async (tokenResponse: any) => {
@@ -176,24 +177,46 @@ export const signInWithGIS = (
               const u: Partial<User> = {
                 uid: profile.sub || 'workspace-user',
                 displayName: profile.name || 'Google Workspace User',
-                email: profile.email || '',
+                email: profile.email || loginHint || '',
                 photoURL: profile.picture || '',
               };
               saveSession(u, token, expiresIn);
+              if (u.email) {
+                try {
+                  localStorage.setItem('gqueues_preferred_workspace_email', u.email);
+                } catch {}
+              }
               resolve({ user: u, accessToken: token });
             } catch {
               const u: Partial<User> = {
                 uid: 'workspace-user',
                 displayName: 'Google Workspace User',
-                email: '',
+                email: loginHint || '',
               };
               saveSession(u, token, expiresIn);
               resolve({ user: u, accessToken: token });
             }
           },
-        });
+          error_callback: (err: any) => {
+            if (err?.type === 'popup_closed') {
+              resolve({ user: {} as any, accessToken: '' });
+              return;
+            }
+            reject(err);
+          },
+        };
 
-        tokenClient.requestAccessToken({ prompt: 'select_account' });
+        if (loginHint) {
+          clientConfig.hint = loginHint;
+        }
+
+        const tokenClient = googleObj.accounts.oauth2.initTokenClient(clientConfig);
+
+        const requestConfig: any = { prompt: 'select_account' };
+        if (loginHint) {
+          requestConfig.hint = loginHint;
+        }
+        tokenClient.requestAccessToken(requestConfig);
       } catch (err) {
         reject(err);
       }
@@ -202,18 +225,13 @@ export const signInWithGIS = (
     if ((window as any).google?.accounts?.oauth2) {
       initClient();
     } else {
-      const existingScript = document.getElementById('google-gsi-client');
-      if (existingScript) {
-        existingScript.onload = () => initClient();
-      } else {
-        const script = document.createElement('script');
-        script.id = 'google-gsi-client';
-        script.src = 'https://accounts.google.com/gsi/client';
-        script.async = true;
-        script.onload = () => initClient();
-        script.onerror = () => reject(new Error('Failed to load Google Identity Services'));
-        document.head.appendChild(script);
-      }
+      ensureGISLoaded().then((loaded) => {
+        if (loaded) {
+          initClient();
+        } else {
+          reject(new Error('Google Identity Services client failed to load'));
+        }
+      });
     }
   });
 };
@@ -248,106 +266,37 @@ export const ensureGISLoaded = (): Promise<boolean> => {
 let silentRefreshPromise: Promise<string | null> | null = null;
 
 /**
- * Attempts silent token refresh via Google Identity Services without showing a popup.
- * If user has granted permissions before in this browser session, GIS returns a new access_token immediately.
+ * Checks if the current session token is still valid.
+ * IMPORTANT: Google Identity Services prohibits calling requestAccessToken()
+ * without a direct user gesture (such as an explicit button click).
+ * Background / unprompted calls are blocked by browsers and generate GSI_LOGGER errors.
+ * This method simply returns the active in-memory token if valid, or notifies session expiration.
  */
 export const refreshAccessTokenSilently = async (): Promise<string | null> => {
-  if (silentRefreshPromise) {
-    return silentRefreshPromise;
+  if (cachedAccessToken && !isTokenExpired()) {
+    return cachedAccessToken;
   }
-
-  silentRefreshPromise = (async () => {
-    try {
-      const loaded = await ensureGISLoaded();
-      if (!loaded) return null;
-
-      const googleObj = (window as any).google;
-      if (!googleObj?.accounts?.oauth2) return null;
-
-      const emailHint = cachedCustomUser?.email || auth.currentUser?.email || '';
-
-      return await new Promise<string | null>((resolve) => {
-        let hasResolved = false;
-        const timer = setTimeout(() => {
-          if (!hasResolved) {
-            hasResolved = true;
-            resolve(null);
-          }
-        }, 8000);
-
-        try {
-          const tokenClient = googleObj.accounts.oauth2.initTokenClient({
-            client_id: firebaseConfig.oAuthClientId,
-            scope: SCOPES.join(' '),
-            hint: emailHint || undefined,
-            callback: (tokenResponse: any) => {
-              if (hasResolved) return;
-              hasResolved = true;
-              clearTimeout(timer);
-
-              if (tokenResponse?.access_token) {
-                const token = tokenResponse.access_token;
-                const expiresIn = Number(tokenResponse.expires_in) || 3500;
-                const user = cachedCustomUser || {
-                  uid: 'workspace-user',
-                  displayName: 'Google Workspace User',
-                  email: emailHint,
-                };
-                saveSession(user, token, expiresIn);
-                console.log('[Auth] Silent token refresh succeeded');
-                resolve(token);
-              } else {
-                console.warn('[Auth] Silent refresh returned no token:', tokenResponse?.error);
-                resolve(null);
-              }
-            },
-            error_callback: (err: any) => {
-              if (hasResolved) return;
-              hasResolved = true;
-              clearTimeout(timer);
-              console.warn('[Auth] Silent refresh error:', err);
-              resolve(null);
-            },
-          });
-
-          // prompt: '' enables silent renewal without opening an interactive popup
-          tokenClient.requestAccessToken({ prompt: '' });
-        } catch (err) {
-          if (!hasResolved) {
-            hasResolved = true;
-            clearTimeout(timer);
-            resolve(null);
-          }
-        }
-      });
-    } catch {
-      return null;
-    } finally {
-      silentRefreshPromise = null;
-    }
-  })();
-
-  return silentRefreshPromise;
+  // If token is missing or expired, mark session as expired so user can click Reconnect
+  notifySessionExpired();
+  return null;
 };
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  // If we already have a cached session from localStorage, load user immediately!
+  // If we already have a cached session from localStorage, restore state immediately!
   if (cachedCustomUser && cachedAccessToken) {
     if (onAuthSuccess) {
       onAuthSuccess(cachedCustomUser as User, cachedAccessToken);
     }
 
-    // If expired or about to expire, run silent background refresh
+    // If expired, notify user gracefully without unprompted popup
     if (isTokenExpired()) {
-      refreshAccessTokenSilently().then((freshToken) => {
-        if (freshToken && onAuthSuccess && cachedCustomUser) {
-          onAuthSuccess(cachedCustomUser as User, freshToken);
-        }
-      });
+      notifySessionExpired();
     }
+  } else {
+    if (onAuthFailure) onAuthFailure();
   }
 
   return onAuthStateChanged(auth, async (user: User | null) => {
@@ -357,52 +306,65 @@ export const initAuth = (
     } else if (cachedCustomUser && cachedAccessToken) {
       if (onAuthSuccess) onAuthSuccess(cachedCustomUser as User, cachedAccessToken);
     } else if (!isSigningIn && !cachedAccessToken) {
-      // Try silent refresh before failing
-      refreshAccessTokenSilently().then((freshToken) => {
-        if (freshToken && cachedCustomUser && onAuthSuccess) {
-          onAuthSuccess(cachedCustomUser as User, freshToken);
-        } else if (onAuthFailure) {
-          onAuthFailure();
-        }
-      });
+      if (onAuthFailure) onAuthFailure();
     }
   });
 };
 
-export const googleSignIn = async (): Promise<{
+export const googleSignIn = async (
+  loginHint?: string
+): Promise<{
   user: User | Partial<User>;
   accessToken: string;
 } | null> => {
   try {
     isSigningIn = true;
+    const effectiveHint =
+      loginHint ||
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem('gqueues_preferred_workspace_email') || ''
+        : '') ||
+      'jarick.montojo@coolaireconsolidated.com';
 
-    // Try standard Firebase popup first
+    // In AI Studio preview iframes (e.g. *.run.app), GIS TokenClient provides
+    // instant, direct Google OAuth tokens without domain authorization errors.
+    if ((window as any).google?.accounts?.oauth2 && firebaseConfig.oAuthClientId) {
+      try {
+        const gisResult = await signInWithGIS(firebaseConfig.oAuthClientId, SCOPES, effectiveHint);
+        if (gisResult?.accessToken) {
+          return gisResult;
+        }
+      } catch (gisErr: any) {
+        console.warn('GIS sign in error, trying Firebase popup fallback:', gisErr);
+      }
+    }
+
+    // Firebase popup fallback with prompt: 'select_account' and login_hint
     try {
+      if (effectiveHint) {
+        provider.setCustomParameters({
+          prompt: 'select_account',
+          login_hint: effectiveHint,
+        });
+      } else {
+        provider.setCustomParameters({
+          prompt: 'select_account',
+        });
+      }
+
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
         saveSession(result.user, credential.accessToken);
+        if (result.user.email) {
+          try {
+            localStorage.setItem('gqueues_preferred_workspace_email', result.user.email);
+          } catch {}
+        }
         return { user: result.user, accessToken: credential.accessToken };
       }
     } catch (firebaseErr: any) {
       const errCode = firebaseErr?.code || '';
-      const errMsg = firebaseErr?.message || '';
-
-      // If unauthorized-domain, operation-not-allowed, or popup issues occur:
-      // seamlessly fallback to Google Identity Services token client using OAuth client ID!
-      if (
-        errCode === 'auth/unauthorized-domain' ||
-        errCode === 'auth/operation-not-allowed' ||
-        errCode === 'auth/configuration-not-found' ||
-        errMsg.includes('unauthorized-domain')
-      ) {
-        console.warn('Firebase Auth unauthorized domain, falling back to Google Identity Services...');
-        const gisResult = await signInWithGIS(firebaseConfig.oAuthClientId, SCOPES);
-        if (!gisResult.accessToken) {
-          return null;
-        }
-        return gisResult;
-      }
 
       if (
         errCode === 'auth/popup-closed-by-user' ||
@@ -411,10 +373,12 @@ export const googleSignIn = async (): Promise<{
         return null;
       }
 
-      if (errCode === 'auth/popup-blocked') {
-        const gisResult = await signInWithGIS(firebaseConfig.oAuthClientId, SCOPES);
-        if (!gisResult.accessToken) return null;
-        return gisResult;
+      if (
+        (window as any).google?.accounts?.oauth2 &&
+        firebaseConfig.oAuthClientId
+      ) {
+        const fallbackGis = await signInWithGIS(firebaseConfig.oAuthClientId, SCOPES, effectiveHint);
+        if (fallbackGis?.accessToken) return fallbackGis;
       }
 
       throw firebaseErr;

@@ -45,6 +45,7 @@ interface HeaderProps {
   onOpenAIModal?: () => void;
   isSessionExpired?: boolean;
   onReconnect?: () => void;
+  onSwitchAccount?: (targetEmail?: string) => void;
   lastSyncTime?: number | null;
 }
 
@@ -70,9 +71,16 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAIModal,
   isSessionExpired = false,
   onReconnect,
+  onSwitchAccount,
   lastSyncTime,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const isWorkEmail = Boolean(
+    user?.email &&
+      (user.email.endsWith('@coolaireconsolidated.com') ||
+        user.email.toLowerCase().includes('coolaire'))
+  );
 
   return (
     <>
@@ -91,6 +99,25 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Reconnect with 1-Click</span>
+          </button>
+        </div>
+      )}
+
+      {/* Non-Work Email Notification Banner */}
+      {user && !isWorkEmail && onSwitchAccount && (
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-purple-800 text-white px-3 sm:px-6 py-2 text-xs font-medium flex items-center justify-between shadow-xs sticky top-0 z-40">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-300" />
+            <span>
+              Signed in as <strong>{user.email}</strong>. Switch to <strong>jarick.montojo@coolaireconsolidated.com</strong> for company queues & workspace features.
+            </span>
+          </div>
+          <button
+            onClick={() => onSwitchAccount('jarick.montojo@coolaireconsolidated.com')}
+            className="px-3 py-1 bg-white text-indigo-950 hover:bg-blue-50 rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0 ml-3 active:scale-95"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Switch to CoolAire Account</span>
           </button>
         </div>
       )}
@@ -438,6 +465,40 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 )}
               </div>
+
+              {/* Account Switching Section */}
+              {onSwitchAccount && (
+                <div className="py-1 border-t border-slate-100 bg-slate-50/60">
+                  <p className="px-4 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Google Account Switcher
+                  </p>
+                  {user?.email !== 'jarick.montojo@coolaireconsolidated.com' && (
+                    <button
+                      onClick={() => {
+                        setShowProfileMenu(false);
+                        onSwitchAccount('jarick.montojo@coolaireconsolidated.com');
+                      }}
+                      className="w-full text-left px-4 py-1.5 text-xs text-blue-700 hover:bg-blue-50 flex items-center gap-2 font-medium transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                      <div className="truncate">
+                        <span className="block font-semibold leading-tight">Switch to CoolAire Account</span>
+                        <span className="text-[10px] text-slate-500 truncate block">jarick.montojo@coolaireconsolidated.com</span>
+                      </div>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onSwitchAccount();
+                    }}
+                    className="w-full text-left px-4 py-1.5 text-xs text-slate-700 hover:bg-slate-100 flex items-center gap-2 transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                    <span>Choose / Switch Account...</span>
+                  </button>
+                </div>
+              )}
 
               <div className="border-t border-slate-100 pt-1">
                 <button

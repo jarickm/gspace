@@ -9,14 +9,16 @@ import {
   ShieldCheck,
   Layers,
   ArrowRight,
-  ExternalLink
+  ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 
 interface AuthScreenProps {
-  onSignIn: () => void;
+  onSignIn: (preferredEmail?: string) => void;
   isLoading: boolean;
   error?: string | null;
   onOpenInstallModal?: () => void;
+  onExploreInteractive?: () => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
@@ -24,7 +26,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   isLoading,
   error,
   onOpenInstallModal,
+  onExploreInteractive,
 }) => {
+  const [selectedEmail, setSelectedEmail] = React.useState<string>(() => {
+    try {
+      return (
+        localStorage.getItem('gqueues_preferred_workspace_email') ||
+        'jarick.montojo@coolaireconsolidated.com'
+      );
+    } catch {
+      return 'jarick.montojo@coolaireconsolidated.com';
+    }
+  });
+  const [useOtherEmail, setUseOtherEmail] = React.useState(false);
+  const [customEmail, setCustomEmail] = React.useState('');
+
+  const targetEmail = useOtherEmail
+    ? customEmail.trim() || undefined
+    : selectedEmail;
+
+  const handleConnectClick = () => {
+    onSignIn(targetEmail);
+  };
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/40 flex flex-col justify-between text-slate-800">
       {/* Top Banner / Navbar */}
@@ -75,13 +98,82 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
         {/* Sign In Card */}
         <div className="mt-8 p-8 bg-white border border-slate-200/80 rounded-2xl shadow-xl shadow-slate-200/50 max-w-md w-full flex flex-col items-center">
-          <p className="text-sm text-slate-600 mb-6 font-medium">
-            Sign in with your Google Workspace or Gmail account to connect your live queues
+          <p className="text-sm text-slate-600 mb-5 font-medium">
+            Connect your live Google Workspace project queues & calendar
           </p>
+
+          {/* Account Selector Widget */}
+          <div className="w-full mb-5 text-left">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-700">Select Google Workspace Account:</span>
+              <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                Account Chooser Enabled
+              </span>
+            </div>
+
+            {/* CoolAire Consolidated Recommended Account Box */}
+            <div
+              onClick={() => {
+                setSelectedEmail('jarick.montojo@coolaireconsolidated.com');
+                setUseOtherEmail(false);
+              }}
+              className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                !useOtherEmail && selectedEmail === 'jarick.montojo@coolaireconsolidated.com'
+                  ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 shadow-xs'
+                  : 'border-slate-200 hover:border-slate-300 bg-slate-50/60'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold flex items-center justify-center text-xs flex-shrink-0 shadow-xs">
+                  CC
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-900 truncate">CoolAire Consolidated Account</p>
+                  <p className="text-[11px] text-blue-700 font-semibold truncate">
+                    jarick.montojo@coolaireconsolidated.com
+                  </p>
+                </div>
+              </div>
+              {!useOtherEmail && selectedEmail === 'jarick.montojo@coolaireconsolidated.com' && (
+                <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+              )}
+            </div>
+
+            {/* Switch Account / Custom Email toggle */}
+            {useOtherEmail ? (
+              <div className="mt-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5 animate-in fade-in duration-100">
+                <label className="text-[11px] font-semibold text-slate-700 block">
+                  Enter your Workspace or Gmail address:
+                </label>
+                <input
+                  type="email"
+                  value={customEmail}
+                  onChange={(e) => setCustomEmail(e.target.value)}
+                  placeholder="e.g. jarick.montojo@coolaireconsolidated.com"
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setUseOtherEmail(false)}
+                  className="text-[11px] text-blue-600 hover:underline font-medium inline-block mt-1 cursor-pointer"
+                >
+                  ← Use default CoolAire Consolidated account
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setUseOtherEmail(true)}
+                className="mt-2 text-[11px] text-slate-500 hover:text-blue-700 font-medium inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>Need to use a different Google email? Click to specify</span>
+              </button>
+            )}
+          </div>
 
           {/* Official Google Sign-In Button */}
           <button
-            onClick={onSignIn}
+            onClick={handleConnectClick}
             disabled={isLoading}
             className="gsi-material-button w-full cursor-pointer hover:shadow-md transition-all active:scale-[0.99] disabled:opacity-50"
           >
@@ -114,10 +206,33 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </svg>
               </div>
               <span className="gsi-material-button-contents font-medium text-slate-800 text-sm">
-                {isLoading ? 'Connecting to Google Workspace...' : 'Sign in with Google'}
+                {isLoading
+                  ? 'Connecting to Google Workspace...'
+                  : targetEmail
+                  ? `Sign in as ${targetEmail.split('@')[0]}`
+                  : 'Sign in with Google'}
               </span>
             </div>
           </button>
+
+          {onExploreInteractive && (
+            <>
+              <div className="relative flex py-3 items-center w-full my-1">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-3 text-slate-400 text-xs uppercase font-medium">or</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onExploreInteractive}
+                className="w-full py-2.5 px-4 rounded-xl border border-indigo-200 hover:border-indigo-400 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 hover:from-blue-100/80 hover:to-indigo-100/80 text-indigo-900 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer active:scale-98"
+              >
+                <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" />
+                <span>Explore Interactive Workspace & AI Companion</span>
+              </button>
+            </>
+          )}
 
           {error && (
             <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs text-left w-full space-y-2">

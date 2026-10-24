@@ -213,6 +213,15 @@ export function formatQueueTitle(category: string, title: string): string {
 }
 
 export async function fetchTaskLists(accessToken: string): Promise<QueueList[]> {
+  if (accessToken === 'demo-token-preview') {
+    try {
+      const saved = localStorage.getItem('gqueues_local_queues');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
+
   const res = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=100', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -245,6 +254,16 @@ export async function createTaskList(
   title: string,
   category: string
 ): Promise<QueueList> {
+  if (accessToken === 'demo-token-preview') {
+    return {
+      id: `q-preview-${Date.now()}`,
+      title,
+      category,
+      updated: new Date().toISOString(),
+      color: '#2563eb',
+    };
+  }
+
   const formattedTitle = formatQueueTitle(category, title);
   const res = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
     method: 'POST',
@@ -277,6 +296,16 @@ export async function updateTaskList(
   title: string,
   category: string
 ): Promise<QueueList> {
+  if (accessToken === 'demo-token-preview') {
+    return {
+      id: listId,
+      title,
+      category,
+      updated: new Date().toISOString(),
+      color: '#2563eb',
+    };
+  }
+
   const formattedTitle = formatQueueTitle(category, title);
   const res = await fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${listId}`, {
     method: 'PATCH',
@@ -304,6 +333,8 @@ export async function updateTaskList(
 }
 
 export async function deleteTaskList(accessToken: string, listId: string): Promise<void> {
+  if (accessToken === 'demo-token-preview') return;
+
   const res = await fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${listId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -316,6 +347,16 @@ export async function deleteTaskList(accessToken: string, listId: string): Promi
 }
 
 export async function fetchTasks(accessToken: string, listId: string): Promise<GQueueTask[]> {
+  if (accessToken === 'demo-token-preview') {
+    try {
+      const savedTasks = localStorage.getItem('gqueues_local_tasks_cache');
+      if (savedTasks) {
+        const parsed = JSON.parse(savedTasks);
+        if (parsed[listId]) return parsed[listId];
+      }
+    } catch {}
+    return [];
+  }
   const url = `https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks?showCompleted=true&showHidden=true&maxResults=100`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -394,6 +435,35 @@ export async function createTask(
 ): Promise<GQueueTask> {
   const nowIso = new Date().toISOString();
   const recurrenceRule = data.recurrenceRule || (data.recurring ? buildRRuleString(data.recurring) : undefined);
+
+  if (accessToken === 'demo-token-preview') {
+    return {
+      id: `task-preview-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      listId,
+      title: data.title || 'New Task',
+      notes: data.notes || '',
+      status: data.status || 'needsAction',
+      priority: data.priority || 'none',
+      starred: !!data.starred,
+      due: data.due,
+      tags: data.tags || [],
+      subtasks: data.subtasks || [],
+      assignedContact: data.assignedContact,
+      driveAttachments: data.driveAttachments || [],
+      calendarEventId: data.calendarEventId,
+      timeEstimate: data.timeEstimate,
+      kanbanStatus: data.kanbanStatus || 'todo',
+      recurring: data.recurring || 'none',
+      recurrenceRule,
+      reminder: data.reminder,
+      completedAt: data.completedAt,
+      createdAt: data.createdAt || nowIso,
+      updated: nowIso,
+      timeLogs: data.timeLogs || [],
+      totalTimeSpentSeconds: data.totalTimeSpentSeconds || 0,
+      dependsOn: data.dependsOn || [],
+    };
+  }
 
   const meta: GQueueTaskMetadata = {
     priority: data.priority || 'none',
@@ -505,6 +575,37 @@ export async function updateTask(
       ? buildRRuleString(data.recurring)
       : undefined;
 
+  if (accessToken === 'demo-token-preview') {
+    return {
+      id: taskId,
+      listId,
+      title: data.title || '',
+      notes: data.notes || '',
+      rawNotes: '',
+      status: data.status || 'needsAction',
+      due: data.due,
+      completed: data.completed,
+      updated: new Date().toISOString(),
+      priority: data.priority || 'none',
+      tags: data.tags || [],
+      starred: !!data.starred,
+      subtasks: data.subtasks || [],
+      assignedContact: data.assignedContact,
+      driveAttachments: data.driveAttachments || [],
+      calendarEventId: data.calendarEventId,
+      timeEstimate: data.timeEstimate,
+      kanbanStatus: data.kanbanStatus || (data.status === 'completed' ? 'done' : 'todo'),
+      recurring: data.recurring || 'none',
+      recurrenceRule,
+      reminder: data.reminder,
+      completedAt: data.completedAt,
+      createdAt: data.createdAt,
+      timeLogs: data.timeLogs || [],
+      totalTimeSpentSeconds: data.totalTimeSpentSeconds || 0,
+      dependsOn: data.dependsOn || [],
+    };
+  }
+
   const meta: GQueueTaskMetadata = {
     priority: data.priority || 'none',
     tags: data.tags || [],
@@ -612,6 +713,8 @@ export async function deleteTask(
   listId: string,
   taskId: string
 ): Promise<void> {
+  if (accessToken === 'demo-token-preview') return;
+
   const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -627,6 +730,8 @@ export async function clearCompletedTasks(
   accessToken: string,
   listId: string
 ): Promise<void> {
+  if (accessToken === 'demo-token-preview') return;
+
   const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${listId}/clear`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },

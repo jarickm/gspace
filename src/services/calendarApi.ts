@@ -41,6 +41,14 @@ export async function fetchCalendarEvents(
   timeMin?: string,
   timeMax?: string
 ): Promise<GoogleCalendarEvent[]> {
+  if (accessToken === 'demo-token-preview') {
+    try {
+      const saved = localStorage.getItem('gqueues_local_calendar');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
   const params = new URLSearchParams({
     singleEvents: 'true',
     orderBy: 'startTime',
@@ -90,6 +98,9 @@ export async function fetchCalendarEvents(
  * Returns enriched meetings with Google Meet video links, status, and live countdowns
  */
 export async function fetchTodayMeetings(accessToken: string): Promise<CalendarMeeting[]> {
+  if (accessToken === 'demo-token-preview') {
+    return [];
+  }
   // Compute exact start & end of day in Philippines (Manila) Time (UTC+8)
   const { timeMin, timeMax } = getManilaDayBounds();
 

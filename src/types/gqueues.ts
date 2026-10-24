@@ -18,6 +18,7 @@ export interface Subtask {
   title: string;
   completed: boolean;
   due?: string;
+  timeEstimate?: string;
 }
 
 export interface DriveAttachment {

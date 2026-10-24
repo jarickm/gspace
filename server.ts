@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
@@ -13,6 +13,20 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '10mb' }));
+
+// Enable CORS for APK, mobile containers, and cross-origin deployment
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
+  );
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // Initialize Google GenAI SDK (Server-Side Only per security rules)
 const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
@@ -59,22 +73,19 @@ function extractJson(text: string): any {
   throw new Error(`Failed to parse AI JSON response: ${text.slice(0, 100)}...`);
 }
 
-// Helper to call Gemini with resilient fallback and low-latency ThinkingLevel.LOW
+// Helper to call Gemini with resilient fallback and ultra-low latency
 async function callGemini(
   prompt: string,
   systemInstruction?: string,
   isJson: boolean = true
 ): Promise<string> {
-  const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+  const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
   let lastError: any = null;
 
   for (const model of modelsToTry) {
     try {
       const config: any = {
         temperature: 0.2,
-        thinkingConfig: {
-          thinkingLevel: ThinkingLevel.LOW,
-        },
       };
 
       if (systemInstruction) {
@@ -97,10 +108,8 @@ async function callGemini(
     } catch (err: any) {
       lastError = err;
       console.warn(`[Gemini API] Model ${model} encountered error:`, err?.message || err);
-      // If 503, 429, or model busy, continue to next model in list
-      if (err?.status === 503 || err?.status === 429 || err?.message?.includes('demand')) {
-        continue;
-      }
+      // Try next model on any error
+      continue;
     }
   }
 
@@ -375,10 +384,46 @@ Generate a helpful response and return ONLY valid JSON with keys "reply" and "su
     const parsed = extractJson(text);
     res.json(parsed);
   } catch (error: any) {
-    console.error('Error in /api/ai/chat:', error);
-    res.status(500).json({
-      error: error?.message || 'Failed to process AI chat message',
-    });
+    console.warn('Fallback applied for /api/ai/chat:', error?.message);
+    const { message = '', workspaceContext = {} } = req.body || {};
+    const activeCount = workspaceContext.totalTasksCount ?? 'several';
+    const queueName = workspaceContext.activeQueueTitle || 'your active queue';
+    const lowerMsg = String(message).toLowerCase();
+
+    let reply = '';
+    let suggestedAction: any = null;
+
+    if (lowerMsg.includes('priorit') || lowerMsg.includes('focus') || lowerMsg.includes('today')) {
+      reply = `### 🎯 Today's Workspace Focus (Manila PHT)\n\n` +
+        `You currently have **${activeCount} active tasks** in **${queueName}**.\n\n` +
+        `**Recommended Next Steps:**\n` +
+        `- Review any urgent or due today deliverables first.\n` +
+        `- Tackle tasks with subtasks step-by-step using Focus Mode.\n` +
+        `- Sync calendar deadlines to protect uninterrupted work blocks.`;
+    } else if (lowerMsg.includes('meeting')) {
+      const mtgs = workspaceContext.todayMeetings || [];
+      reply = `### 📅 Meeting Schedule Overview\n\n` +
+        `You have **${mtgs.length} meeting(s)** scheduled for today in Philippine Standard Time (UTC+8).\n\n` +
+        (mtgs.length > 0 ? mtgs.map((m: string) => `- ${m}`).join('\n') : `- No meetings scheduled. Great time for deep focus!`);
+    } else if (lowerMsg.includes('create') || lowerMsg.includes('add') || lowerMsg.includes('task')) {
+      const taskTitle = message.replace(/create|add|task|please/gi, '').trim() || 'New Workspace Task';
+      reply = `I have drafted a task based on your request: **"${taskTitle}"**.\n\nClick below to immediately add it to your queue:`;
+      suggestedAction = {
+        type: 'create_task',
+        task: {
+          title: taskTitle,
+          priority: 'high',
+          timeEstimate: '45m',
+        },
+      };
+    } else {
+      reply = `👋 **GQueues AI Companion is ready to assist!**\n\n` +
+        `I have full visibility into your active queue (**${queueName}**) and tasks.\n\n` +
+        `I can help you prioritize deliverables, break down complex projects into subtasks, organize your daily schedule, or draft new work items.\n\n` +
+        `What would you like to accomplish next?`;
+    }
+
+    res.json({ reply, suggestedAction });
   }
 });
 
@@ -411,7 +456,11 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Fatal error starting server:', err);
-  process.exit(1);
-});
+if (process.env.VERCEL !== '1') {
+  startServer().catch((err) => {
+    console.error('Fatal error starting server:', err);
+    process.exit(1);
+  });
+}
+
+export default app;

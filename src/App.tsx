@@ -7,7 +7,6 @@ import {
   auth,
   isTokenExpired,
   onSessionExpired,
-  refreshAccessTokenSilently,
 } from './services/firebase';
 import type {
   QueueList,
@@ -67,6 +66,7 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { AIAssistantModal } from './components/AIAssistantModal';
+import { Sparkles } from 'lucide-react';
 
 export default function App() {
   // Authentication states
@@ -75,6 +75,7 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   // App data states (hydrated from localStorage cache for instant zero-delay render)
   const [queues, setQueues] = useState<QueueList[]>(() => {
@@ -225,15 +226,16 @@ export default function App() {
   }, []);
 
   // Handle Google Workspace Sign-In
-  const handleSignIn = async () => {
+  const handleSignIn = async (preferredEmail?: string) => {
     setIsLoggingIn(true);
     setAuthError(null);
     try {
-      const res = await googleSignIn();
+      const res = await googleSignIn(preferredEmail);
       if (res) {
         setUser(res.user as User);
         setToken(res.accessToken);
         setIsSessionExpired(false);
+        setIsDemoMode(false);
       }
     } catch (err: any) {
       if (
@@ -259,14 +261,18 @@ export default function App() {
     setIsLoggingIn(true);
     setAuthError(null);
     try {
-      const res = await googleSignIn();
+      const preferred =
+        user?.email ||
+        localStorage.getItem('gqueues_preferred_workspace_email') ||
+        'jarick.montojo@coolaireconsolidated.com';
+      const res = await googleSignIn(preferred);
       if (res?.accessToken) {
         setUser(res.user as User);
         setToken(res.accessToken);
         setIsSessionExpired(false);
         addNotification({
           title: 'Workspace Reconnected',
-          message: 'Your Google Workspace connection is active. Refreshing records...',
+          message: `Reconnected as ${res.user.email || preferred}. Refreshing records...`,
           type: 'success',
         });
         loadInitialWorkspaceData(res.accessToken);
@@ -276,6 +282,47 @@ export default function App() {
       addNotification({
         title: 'Reconnect Error',
         message: err.message || 'Please sign in again to refresh your token.',
+        type: 'warning',
+      });
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  // Switch Google Workspace Account with explicit account chooser
+  const handleSwitchAccount = async (targetEmail?: string) => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      const emailToUse =
+        targetEmail ||
+        (user?.email?.endsWith('@coolaireconsolidated.com')
+          ? undefined
+          : 'jarick.montojo@coolaireconsolidated.com');
+      const res = await googleSignIn(emailToUse);
+      if (res?.accessToken) {
+        setUser(res.user as User);
+        setToken(res.accessToken);
+        setIsSessionExpired(false);
+        setIsDemoMode(false);
+        addNotification({
+          title: 'Google Account Connected',
+          message: `Now active as ${res.user.email || emailToUse}. Syncing queues...`,
+          type: 'success',
+        });
+        loadInitialWorkspaceData(res.accessToken);
+      }
+    } catch (err: any) {
+      if (
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'auth/cancelled-popup-request'
+      ) {
+        return;
+      }
+      console.error('Switch account failed:', err);
+      addNotification({
+        title: 'Account Switch Failed',
+        message: err.message || 'Could not switch accounts. Please try again.',
         type: 'warning',
       });
     } finally {
@@ -293,6 +340,7 @@ export default function App() {
     setContacts([]);
     setCalendarEvents([]);
     setIsSessionExpired(false);
+    setIsDemoMode(false);
     try {
       localStorage.removeItem('gqueues_local_queues');
       localStorage.removeItem('gqueues_local_active_queue_id');
@@ -302,6 +350,125 @@ export default function App() {
       localStorage.removeItem('gqueues_last_sync_time');
     } catch {}
   };
+
+  const handleStartDemoMode = useCallback(() => {
+    setIsDemoMode(true);
+    const demoUser = {
+      uid: 'workspace-demo-user',
+      displayName: 'Workspace Lead (Preview)',
+      email: 'team.lead@coolaireconsolidated.com',
+    } as any;
+    setUser(demoUser);
+    setToken('demo-token-preview');
+
+    const demoQueues: QueueList[] = [
+      { id: 'q-strategy', title: 'Q4 Strategic Priorities', category: 'Executive', color: '#2563eb' },
+      { id: 'q-operations', title: 'Operations & Procurement', category: 'CoolAire HVAC', color: '#059669' },
+      { id: 'q-client', title: 'Client Projects & Delivery', category: 'Client Work', color: '#7c3aed' },
+    ];
+
+    const todayDate = getManilaTodayDateString();
+    const demoTasks: GQueueTask[] = [
+      {
+        id: 'task-1',
+        listId: 'q-strategy',
+        title: 'Review Q4 CoolAire Consolidated financial forecasts and margins',
+        notes: 'Review HVAC commercial branch revenue targets against pipeline forecasts with finance team.',
+        status: 'needsAction',
+        kanbanStatus: 'todo',
+        priority: 'urgent',
+        starred: true,
+        due: todayDate,
+        tags: ['Finance', 'Executive', 'Q4'],
+        timeEstimate: '1h 30m',
+        subtasks: [
+          { id: 'sub-1', title: 'Extract balance sheets & revenue projections', completed: true, timeEstimate: '20m' },
+          { id: 'sub-2', title: 'Highlight variance and margin deviations', completed: false, timeEstimate: '30m' },
+          { id: 'sub-3', title: 'Prepare summary deck for executive meeting', completed: false, timeEstimate: '40m' },
+        ],
+        driveAttachments: [],
+        updated: new Date().toISOString(),
+        recurring: 'none',
+        timeLogs: [],
+        totalTimeSpentSeconds: 0,
+      },
+      {
+        id: 'task-2',
+        listId: 'q-strategy',
+        title: 'Finalize vendor procurement contracts for BGC site expansion',
+        notes: 'Coordinate with supplier on lead times for chilled water plant valves and cooling towers.',
+        status: 'needsAction',
+        kanbanStatus: 'todo',
+        priority: 'high',
+        starred: false,
+        due: todayDate,
+        tags: ['Procurement', 'HVAC'],
+        timeEstimate: '45m',
+        subtasks: [
+          { id: 'sub-4', title: 'Verify specifications compliance', completed: true },
+          { id: 'sub-5', title: 'Send revised SLA to vendor', completed: false },
+        ],
+        driveAttachments: [],
+        updated: new Date().toISOString(),
+        recurring: 'none',
+        timeLogs: [],
+        totalTimeSpentSeconds: 0,
+      },
+      {
+        id: 'task-3',
+        listId: 'q-operations',
+        title: 'Conduct weekly safety & equipment maintenance inspection',
+        notes: 'Walkthrough cooling coils, chiller compressors, and refrigerant safety valves.',
+        status: 'needsAction',
+        kanbanStatus: 'todo',
+        priority: 'medium',
+        starred: false,
+        due: todayDate,
+        tags: ['Maintenance', 'Safety'],
+        timeEstimate: '1h',
+        subtasks: [],
+        driveAttachments: [],
+        updated: new Date().toISOString(),
+        recurring: 'none',
+        timeLogs: [],
+        totalTimeSpentSeconds: 0,
+      },
+    ];
+
+    setQueues(demoQueues);
+    setActiveQueueId('q-strategy');
+    setTasks(demoTasks);
+    setAllTasksCache({
+      'q-strategy': demoTasks.slice(0, 2),
+      'q-operations': [demoTasks[2]],
+      'q-client': [],
+    });
+
+    setTodayMeetings([
+      {
+        id: 'm-1',
+        summary: 'Executive Pipeline & Delivery Sync',
+        start: { dateTime: `${todayDate}T10:00:00+08:00` },
+        end: { dateTime: `${todayDate}T11:00:00+08:00` },
+        attendees: [{ displayName: 'Maria Santos', email: 'maria@coolaireconsolidated.com' }],
+        location: 'Google Meet',
+      },
+      {
+        id: 'm-2',
+        summary: 'Vendor Procurement Q&A (Chiller Components)',
+        start: { dateTime: `${todayDate}T14:30:00+08:00` },
+        end: { dateTime: `${todayDate}T15:15:00+08:00` },
+        attendees: [{ displayName: 'Kenji Tan', email: 'kenji@supplier.com' }],
+        location: 'Google Meet',
+      },
+    ]);
+
+    addNotification({
+      title: 'Interactive Preview Active',
+      message: 'Workspace loaded. Test the AI Companion, Task Breakdown, and Natural Add features!',
+      type: 'success',
+    });
+  }, [addNotification]);
 
   // Load Queues, Contacts, and Calendar events from Google APIs with localStorage caching
   const loadInitialWorkspaceData = useCallback(async (accessToken: string) => {
@@ -394,68 +561,40 @@ export default function App() {
     } catch (err: any) {
       console.error('Failed to load Google Workspace data:', err);
       if (err?.message?.includes('401') || isTokenExpired()) {
-        const fresh = await refreshAccessTokenSilently();
-        if (fresh) {
-          setToken(fresh);
-          setIsSessionExpired(false);
-          try {
-            await loadInitialWorkspaceData(fresh);
-            return;
-          } catch {}
-        } else {
-          setIsSessionExpired(true);
-        }
+        setIsSessionExpired(true);
       }
     } finally {
       setIsSyncing(false);
     }
   }, [activeQueueId, user?.email]);
 
-  // Trigger loading when token is set or refreshed
+  // Trigger loading when token is set or restored
   useEffect(() => {
     if (token) {
       if (isTokenExpired()) {
-        refreshAccessTokenSilently().then((fresh) => {
-          if (fresh) {
-            setToken(fresh);
-            setIsSessionExpired(false);
-            loadInitialWorkspaceData(fresh);
-          } else {
-            setIsSessionExpired(true);
-          }
-        });
+        setIsSessionExpired(true);
       } else {
         loadInitialWorkspaceData(token);
       }
     }
   }, [token, loadInitialWorkspaceData]);
 
-  // Foreground re-validation & auto-refresh on focus or visibilitychange
+  // Foreground re-validation on focus or visibilitychange (uses active token, never triggers unprompted popups)
   useEffect(() => {
-    const handleRevalidate = async () => {
+    const handleRevalidate = () => {
       if (document.visibilityState === 'visible') {
-        let activeToken = token;
-        if (!activeToken || isTokenExpired()) {
-          const fresh = await refreshAccessTokenSilently();
-          if (fresh) {
-            setToken(fresh);
-            setIsSessionExpired(false);
-            activeToken = fresh;
-          } else if (isTokenExpired()) {
-            setIsSessionExpired(true);
-            return;
-          }
+        if (!token || isTokenExpired()) {
+          setIsSessionExpired(true);
+          return;
         }
-        if (activeToken) {
-          loadInitialWorkspaceData(activeToken);
-        }
+        loadInitialWorkspaceData(token);
       }
     };
 
     document.addEventListener('visibilitychange', handleRevalidate);
     window.addEventListener('focus', handleRevalidate);
 
-    // Auto-refresh every 2 minutes
+    // Auto-refresh every 2 minutes if session is active
     const interval = setInterval(() => {
       handleRevalidate();
     }, 120000);
@@ -677,26 +816,29 @@ export default function App() {
 
   // Refresh handler
   const handleRefresh = async () => {
-    setIsSyncing(true);
-    let activeToken = token;
-    if (!activeToken || isTokenExpired()) {
-      const fresh = await refreshAccessTokenSilently();
-      if (fresh) {
-        setToken(fresh);
-        setIsSessionExpired(false);
-        activeToken = fresh;
-      } else {
-        setIsSessionExpired(true);
-        setIsSyncing(false);
-        return;
-      }
+    if (!token || isTokenExpired()) {
+      setIsSessionExpired(true);
+      return;
     }
-    await loadInitialWorkspaceData(activeToken);
-    addNotification({
-      title: 'Workspace Refreshed',
-      message: 'All tasks, queues, and calendar events are up to date.',
-      type: 'success',
-    });
+    if (token === 'demo-token-preview') {
+      addNotification({
+        title: 'Workspace Refreshed',
+        message: 'Interactive workspace data refreshed.',
+        type: 'success',
+      });
+      return;
+    }
+    setIsSyncing(true);
+    try {
+      await loadInitialWorkspaceData(token);
+      addNotification({
+        title: 'Workspace Refreshed',
+        message: 'All tasks, queues, and calendar events are up to date.',
+        type: 'success',
+      });
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // --- Task CRUD operations ---
@@ -1479,6 +1621,7 @@ export default function App() {
           isLoading={isLoggingIn}
           error={authError}
           onOpenInstallModal={() => setIsInstallModalOpen(true)}
+          onExploreInteractive={handleStartDemoMode}
         />
         <InstallModal
           isOpen={isInstallModalOpen}
@@ -1491,6 +1634,24 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 text-slate-800 font-sans">
+      {/* Interactive Preview Banner */}
+      {isDemoMode && (
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-purple-800 text-white px-3 sm:px-6 py-2 text-xs font-medium flex items-center justify-between shadow-xs sticky top-0 z-40">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse flex-shrink-0" />
+            <span>
+              <strong>Interactive Preview Mode:</strong> All AI features (AI Companion, Task Breakdown, Daily Briefing, Natural Add) are fully active.
+            </span>
+          </div>
+          <button
+            onClick={() => handleSignIn()}
+            className="px-3 py-1 bg-white text-indigo-900 hover:bg-blue-50 rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0 ml-3 active:scale-95"
+          >
+            <span>Connect Google Workspace</span>
+          </button>
+        </div>
+      )}
+
       {/* App Header */}
       <Header
         user={user}
@@ -1517,6 +1678,7 @@ export default function App() {
         onOpenAIModal={() => setIsAIModalOpen(true)}
         isSessionExpired={isSessionExpired}
         onReconnect={handleReconnect}
+        onSwitchAccount={handleSwitchAccount}
         lastSyncTime={lastSyncTime}
       />
 
