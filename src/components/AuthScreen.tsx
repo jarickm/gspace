@@ -11,6 +11,7 @@ import {
   ArrowRight,
   ExternalLink,
   Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 
 interface AuthScreenProps {
@@ -250,6 +251,31 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
             </div>
           )}
+
+          {typeof window !== 'undefined' &&
+            window.location.hostname !== 'localhost' &&
+            !window.location.hostname.endsWith('run.app') && (
+              <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-left w-full text-xs text-amber-900 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <span>Vercel / Custom Domain Setup</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-800">
+                  Seeing <em>origin={typeof window !== 'undefined' ? window.location.origin : ''}</em>? Google OAuth requires adding this origin to <strong>Authorized JavaScript origins</strong> in Google Cloud Console.
+                </p>
+                <div className="pt-1 flex items-center justify-between text-[11px]">
+                  <a
+                    href="https://ais-dev-enxnpelbddd7tflkv7rfjd-462514151820.asia-east1.run.app"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-blue-700 hover:underline flex items-center gap-1"
+                  >
+                    <span>Open Pre-Authorized Studio URL</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            )}
 
           <div className="mt-3 text-[11px] text-slate-400">
             Having trouble with browser popups?{' '}

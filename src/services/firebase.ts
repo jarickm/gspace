@@ -326,16 +326,32 @@ export const googleSignIn = async (
         : '') ||
       'jarick.montojo@coolaireconsolidated.com';
 
+    const activeClientId =
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem('gqueues_custom_client_id')
+        : null) ||
+      (import.meta.env.VITE_GOOGLE_CLIENT_ID as string) ||
+      firebaseConfig.oAuthClientId;
+
     // In AI Studio preview iframes (e.g. *.run.app), GIS TokenClient provides
     // instant, direct Google OAuth tokens without domain authorization errors.
-    if ((window as any).google?.accounts?.oauth2 && firebaseConfig.oAuthClientId) {
+    if ((window as any).google?.accounts?.oauth2 && activeClientId) {
       try {
-        const gisResult = await signInWithGIS(firebaseConfig.oAuthClientId, SCOPES, effectiveHint);
+        const gisResult = await signInWithGIS(activeClientId, SCOPES, effectiveHint);
         if (gisResult?.accessToken) {
           return gisResult;
         }
       } catch (gisErr: any) {
         console.warn('GIS sign in error, trying Firebase popup fallback:', gisErr);
+        if (
+          gisErr?.message?.includes('origin') ||
+          gisErr?.message?.includes('idpiframe') ||
+          gisErr?.error === 'idpiframe_initialization_failed'
+        ) {
+          throw new Error(
+            `Google OAuth origin mismatch: "${window.location.origin}" is not registered in Google Cloud Console. Add "${window.location.origin}" to Authorized JavaScript origins for OAuth Client ID ${activeClientId.slice(0, 20)}...`
+          );
+        }
       }
     }
 
@@ -373,11 +389,17 @@ export const googleSignIn = async (
         return null;
       }
 
+      if (errCode === 'auth/unauthorized-domain') {
+        throw new Error(
+          `Domain "${window.location.hostname}" is not authorized. In Firebase Console > Authentication > Settings > Authorized domains, add "${window.location.hostname}".`
+        );
+      }
+
       if (
         (window as any).google?.accounts?.oauth2 &&
-        firebaseConfig.oAuthClientId
+        activeClientId
       ) {
-        const fallbackGis = await signInWithGIS(firebaseConfig.oAuthClientId, SCOPES, effectiveHint);
+        const fallbackGis = await signInWithGIS(activeClientId, SCOPES, effectiveHint);
         if (fallbackGis?.accessToken) return fallbackGis;
       }
 
