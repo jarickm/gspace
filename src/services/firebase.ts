@@ -124,6 +124,7 @@ export const clearSession = () => {
   tokenExpiresAt = 0;
   try {
     localStorage.removeItem('gqueues_auth_session');
+    localStorage.removeItem('gqueues_preferred_workspace_email');
   } catch {
     // Ignore storage clear error
   }
@@ -322,9 +323,8 @@ export const googleSignIn = async (
     const effectiveHint =
       loginHint ||
       (typeof localStorage !== 'undefined'
-        ? localStorage.getItem('gqueues_preferred_workspace_email') || ''
-        : '') ||
-      'jarick.montojo@coolaireconsolidated.com';
+        ? localStorage.getItem('gqueues_preferred_workspace_email') || undefined
+        : undefined);
 
     const activeClientId =
       (typeof localStorage !== 'undefined'

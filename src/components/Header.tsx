@@ -109,15 +109,15 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-300" />
             <span>
-              Signed in as <strong>{user.email}</strong>. Switch to <strong>jarick.montojo@coolaireconsolidated.com</strong> for company queues & workspace features.
+              Signed in as <strong>{user.email}</strong>. Switch to your company <strong>@coolaireconsolidated.com</strong> account for company queues & workspace features.
             </span>
           </div>
           <button
-            onClick={() => onSwitchAccount('jarick.montojo@coolaireconsolidated.com')}
+            onClick={() => onSwitchAccount()}
             className="px-3 py-1 bg-white text-indigo-950 hover:bg-blue-50 rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0 ml-3 active:scale-95"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>Switch to CoolAire Account</span>
+            <span>Switch Google Account</span>
           </button>
         </div>
       )}
@@ -472,30 +472,18 @@ export const Header: React.FC<HeaderProps> = ({
                   <p className="px-4 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     Google Account Switcher
                   </p>
-                  {user?.email !== 'jarick.montojo@coolaireconsolidated.com' && (
-                    <button
-                      onClick={() => {
-                        setShowProfileMenu(false);
-                        onSwitchAccount('jarick.montojo@coolaireconsolidated.com');
-                      }}
-                      className="w-full text-left px-4 py-1.5 text-xs text-blue-700 hover:bg-blue-50 flex items-center gap-2 font-medium transition-colors"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
-                      <div className="truncate">
-                        <span className="block font-semibold leading-tight">Switch to CoolAire Account</span>
-                        <span className="text-[10px] text-slate-500 truncate block">jarick.montojo@coolaireconsolidated.com</span>
-                      </div>
-                    </button>
-                  )}
                   <button
                     onClick={() => {
                       setShowProfileMenu(false);
                       onSwitchAccount();
                     }}
-                    className="w-full text-left px-4 py-1.5 text-xs text-slate-700 hover:bg-slate-100 flex items-center gap-2 transition-colors"
+                    className="w-full text-left px-4 py-1.5 text-xs text-blue-700 hover:bg-blue-50 flex items-center gap-2 font-medium transition-colors"
                   >
-                    <RefreshCw className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                    <span>Choose / Switch Account...</span>
+                    <RefreshCw className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                    <div className="truncate">
+                      <span className="block font-semibold leading-tight">Switch Google Account...</span>
+                      <span className="text-[10px] text-slate-500 truncate block">Sign in with different Google Workspace user</span>
+                    </div>
                   </button>
                 </div>
               )}

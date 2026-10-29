@@ -263,8 +263,9 @@ export default function App() {
     try {
       const preferred =
         user?.email ||
-        localStorage.getItem('gqueues_preferred_workspace_email') ||
-        'jarick.montojo@coolaireconsolidated.com';
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('gqueues_preferred_workspace_email') || undefined
+          : undefined);
       const res = await googleSignIn(preferred);
       if (res?.accessToken) {
         setUser(res.user as User);
@@ -272,7 +273,7 @@ export default function App() {
         setIsSessionExpired(false);
         addNotification({
           title: 'Workspace Reconnected',
-          message: `Reconnected as ${res.user.email || preferred}. Refreshing records...`,
+          message: `Reconnected as ${res.user.email || 'Google Workspace'}. Refreshing records...`,
           type: 'success',
         });
         loadInitialWorkspaceData(res.accessToken);
@@ -294,12 +295,13 @@ export default function App() {
     setIsLoggingIn(true);
     setAuthError(null);
     try {
-      const emailToUse =
-        targetEmail ||
-        (user?.email?.endsWith('@coolaireconsolidated.com')
-          ? undefined
-          : 'jarick.montojo@coolaireconsolidated.com');
-      const res = await googleSignIn(emailToUse);
+      // If user is choosing an account without specifying target, clear any previously saved hint
+      if (!targetEmail) {
+        try {
+          localStorage.removeItem('gqueues_preferred_workspace_email');
+        } catch {}
+      }
+      const res = await googleSignIn(targetEmail);
       if (res?.accessToken) {
         setUser(res.user as User);
         setToken(res.accessToken);
@@ -307,7 +309,7 @@ export default function App() {
         setIsDemoMode(false);
         addNotification({
           title: 'Google Account Connected',
-          message: `Now active as ${res.user.email || emailToUse}. Syncing queues...`,
+          message: `Now active as ${res.user.email || 'Google Workspace'}. Syncing queues...`,
           type: 'success',
         });
         loadInitialWorkspaceData(res.accessToken);
@@ -348,6 +350,7 @@ export default function App() {
       localStorage.removeItem('gqueues_local_calendar');
       localStorage.removeItem('gqueues_local_contacts');
       localStorage.removeItem('gqueues_last_sync_time');
+      localStorage.removeItem('gqueues_preferred_workspace_email');
     } catch {}
   };
 
